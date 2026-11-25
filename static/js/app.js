@@ -14,7 +14,8 @@ export const TF_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
 export const TF_NAME = { '1m': '1 minute', '3m': '3 minutes', '5m': '5 minutes', '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '2h': '2 hours', '4h': '4 hours', '12h': '12 hours', '1D': '1 day', '1W': '1 week', '1M': '1 month' };
 const TF_SHORT = { '1D': 'D', '1W': 'W', '1M': 'M' };
 const INITIAL_BARS = 3000;
-const MORE_BARS = 2000;
+const MORE_BARS = 2000;        // first history chunk; later chunks grow with the loaded history
+const MAX_MORE_BARS = 20000;   // = backend market.MAX_LIMIT
 
 const CHART_TYPES = {
   bars: 'Bars', candles: 'Candles', hollow: 'Hollow candles', volcandles: 'Volume candles',
@@ -248,6 +249,7 @@ function createChart() {
     if (!lgFrame) lgFrame = requestAnimationFrame(() => { lgFrame = 0; updateLegendValues(lastCrosshair); });
   });
   app.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+    lastScroll = performance.now();
     if (r && r.from < 30) loadMore();
   });
   new ResizeObserver(() => positionPaneLegends()).observe(container);
@@ -619,13 +621,31 @@ export async function setTf(tf) {
 app.setTf = setTf;
 
 let loadingMore = false;
+// Recompute indicators after history loads only when scrolling has paused for a moment, so a
+// fast scroll through several loads costs one recompute instead of one per load.
+let lastScroll = 0, scrollRefresh = null;
+function refreshAfterScroll() {
+  if (scrollRefresh) return;
+  const wait = () => {
+    const idle = performance.now() - lastScroll;
+    if (idle < 150 || loadingMore) { scrollRefresh = setTimeout(wait, Math.max(30, 150 - idle)); return; }
+    scrollRefresh = null;
+    refreshIndicators();
+  };
+  wait();
+}
+app.indicatorsPending = () => !!scrollRefresh;
+
 async function loadMore() {
   if (loadingMore || S.exhausted || !S.bars.length) return;
   loadingMore = true;
   const token = loadToken;
   try {
     const first = S.bars[0].time - S.tzOffset;
-    const res = await api.bars(S.symbol, S.tf, first, MORE_BARS);
+    // Every load re-sends all series to the chart, so load as much as is already loaded (doubling):
+    // the total work grows linearly with the history instead of quadratically.
+    const want = Math.max(MORE_BARS, Math.min(MAX_MORE_BARS, S.bars.length));
+    const res = await api.bars(S.symbol, S.tf, first, want);
     if (token !== loadToken) return;
     if (!res.bars.length) {
       S.exhausted = true;
@@ -633,7 +653,7 @@ async function loadMore() {
       return;
     }
     const older = res.bars.map(toBar).filter(b => b.time < S.bars[0].time);
-    if (res.bars.length < MORE_BARS) S.exhausted = true;
+    if (res.bars.length < want) S.exhausted = true;
     const gap = S.bars[0].time - older[older.length - 1].time;
     if (gap > TF_SEC[S.tf] * 1.5) {
       toast(`ClickHouse data ends at ${fmtTime(older[older.length - 1].time)}; there is a gap of ${Math.round(gap / TF_SEC[S.tf])} bars up to the live data.`, 'info', 'Data gap', 7000);
@@ -646,8 +666,8 @@ async function loadMore() {
     setMainData();
     const added = S.view.length - before;
     if (r) ts.setVisibleLogicalRange({ from: r.from + added, to: r.to + added });
-    await refreshIndicators();
     app.dm.update();
+    refreshAfterScroll(); // indicators follow once the user stops scrolling (results stay aligned meanwhile)
   } catch (e) {
     toast('Failed to load history: ' + e.message, 'error');
   } finally {
@@ -685,7 +705,12 @@ function openStream(provider, symbol, tf, token) {
     setMainData(false);
     if (appended) app.dm.update();
     // Indicators: recompute at most once per second (custom scripts run in a worker)
-    if (!indTimer) indTimer = setTimeout(() => { indTimer = null; refreshIndicators().then(() => updateLegendValues(lastCrosshair)); }, appended || closed ? 50 : 1000);
+    if (!indTimer) indTimer = setTimeout(() => {
+      indTimer = null;
+      // while the user scrolls, wait for the pause (one recompute for all history loads and ticks)
+      if (performance.now() - lastScroll < 150 || scrollRefresh) { refreshAfterScroll(); return; }
+      refreshIndicators().then(() => updateLegendValues(lastCrosshair));
+    }, appended || closed ? 50 : 1000);
     updateLegendValues(lastCrosshair);
     app.emit('tick', symbol, b);
   }, (state) => setStatus(state === 'open' ? 'ok' : state === 'connecting' ? 'busy' : 'err', state === 'open' ? '' : `Websocket: ${state}`));
@@ -889,6 +914,26 @@ function resOff(res) {
   return lo;
 }
 
+/**
+ * How a plot is sent to the chart. 'const': a single value on every bar with one color (Pine level
+ * lines such as plot(60)): two points span the whole history, an autoscale hint keeps the level in
+ * the pane range. 'dots': circles/cross plots that are mostly empty: only bars with a value are sent.
+ */
+function plotMode(p) {
+  if (p.style === 'circles' || p.style === 'cross' || p.style === 'dots') return 'dots';
+  if ((p.style === 'line' || p.style === 'stepline') && !p.colors) {
+    let v = null, first = -1, cnt = 0;
+    for (let i = 0; i < p.data.length; i++) {
+      const x = p.data[i];
+      if (x == null) continue;
+      if (v === null) { v = x; first = i; } else if (x !== v) return null;
+      cnt++;
+    }
+    if (cnt >= 2 && first === p.data.findIndex(x => x != null)) { p.constValue = v; return 'const'; }
+  }
+  return null;
+}
+
 function point(plot, i) {
   const t = S.view[i].time, v = plot.data[i];
   if (v == null) return { time: t };
@@ -901,6 +946,15 @@ function point(plot, i) {
 // Push a plot to its series: only the changed last bar on live ticks (cheap), everything otherwise.
 function syncSeries(s, prev, p) {
   const n = p.data.length;
+  p.mode = plotMode(p);
+  if (p.mode === 'const' || prev?.mode === 'const') {
+    // two points only: cheap to re-send; keep the autoscale hint in line with the value
+    if (p.mode !== prev?.mode || p.constValue !== prev?.constValue || n !== prev?.data.length) {
+      s.applyOptions({ autoscaleInfoProvider: constScale(p) });
+      s.setData(seriesData(p));
+    }
+    return;
+  }
   if (!prev || prev.data.length !== n || prev.style !== p.style || n > S.view.length) { s.setData(seriesData(p)); return; }
   let k = n;
   for (let i = 0; i < n; i++) {
@@ -911,10 +965,22 @@ function syncSeries(s, prev, p) {
   else s.setData(seriesData(p));
 }
 
+const constScale = (p) => (p.mode === 'const' ? () => ({ priceRange: { minValue: p.constValue, maxValue: p.constValue } }) : undefined);
+
 function seriesData(plot) {
   const n = Math.min(plot.data.length, S.view.length);
-  const out = new Array(n);
-  for (let i = 0; i < n; i++) out[i] = point(plot, i);
+  const mode = plot.mode;
+  if (mode === 'const') {
+    let first = 0, last = n - 1;
+    while (first < n && plot.data[first] == null) first++;
+    while (last > first && plot.data[last] == null) last--;
+    return first < last ? [point(plot, first), point(plot, last)] : [];
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (mode === 'dots' && plot.data[i] == null) continue; // no line to break: empty bars are not needed
+    out.push(point(plot, i));
+  }
   return out;
 }
 
@@ -1031,6 +1097,8 @@ function rebuildIndicatorSeries(items) {
       if (res.overlay && !res.volume) common.priceFormat = { type: 'price', precision: S.priceDecimals, minMove: Math.pow(10, -S.priceDecimals) };
       if (res.volume) common.priceFormat = { type: 'volume' };
       let s;
+      p.mode = plotMode(p);
+      if (p.mode === 'const') common.autoscaleInfoProvider = constScale(p);
       if (p.style === 'histogram' || p.style === 'columns') s = c.addSeries(LWC.HistogramSeries, { ...common, color: p.color, base: 0 }, pane);
       // Pine area plots fill to zero with one flat color (histbase 0), not to the pane bottom
       else if (p.style === 'area') s = c.addSeries(LWC.BaselineSeries, { ...common, baseValue: { type: 'price', price: 0 }, topLineColor: p.color, bottomLineColor: p.color, topFillColor1: p.color, topFillColor2: p.color, bottomFillColor1: p.color, bottomFillColor2: p.color, lineWidth: p.width }, pane);

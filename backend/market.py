@@ -6,7 +6,7 @@ import time
 from . import ch, datasources, live
 
 TIMEFRAMES = datasources.APP_TFS
-MAX_LIMIT = 5000
+MAX_LIMIT = 20000  # one history request; the chart asks for chunks that grow with the loaded history
 
 
 class NotFound(Exception):
