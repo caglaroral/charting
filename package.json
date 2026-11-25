@@ -1,0 +1,6 @@
+{
+  "name": "charting",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted TradingView-style charting on ClickHouse"
+}

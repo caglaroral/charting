@@ -1,0 +1,91 @@
+// TC-SCRIPT: custom indicators (ChartScript) — editor, run, errors, sandbox, Pine ports
+import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import { login, trackErrors, resetLayout } from '../helpers.js';
+
+const example = (f) => fs.readFileSync(new URL(`../../../examples/${f}`, import.meta.url), 'utf8');
+
+async function openEditor(page) {
+  await page.click('#btn-editor');
+  await page.waitForFunction(() => window.__cm);
+}
+const setCode = (page, code) => page.evaluate((c) => window.__cm.setValue(c), code);
+
+test.beforeEach(async ({ page }) => { await login(page); await resetLayout(page); });
+
+test('TC-SCRIPT-01 write, run, save and add a custom indicator', async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await page.click('[data-testid=script-new]');
+  await page.fill('[data-testid=script-name]', 'E2E EMA cross');
+  await page.click('[data-testid=script-run]');
+  await expect(page.locator('.editor-out .ok-box')).toContainText('2 plot');
+  await page.click('[data-testid=script-add]');
+  await page.waitForFunction(() => __app.ind.items.some(i => i.res.name === 'My Indicator' && i.res.plots?.length === 2));
+  await expect(page.locator('#legend')).toContainText('My Indicator 9 21');
+  expect(errors).toEqual([]);
+});
+
+test('TC-SCRIPT-02 syntax and runtime errors are reported with a line number', async ({ page }) => {
+  await openEditor(page);
+  await page.click('[data-testid=script-new]');
+  await setCode(page, "indicator('x')\nconst a = 1\nplot(undefinedVariable)\n");
+  await page.click('[data-testid=script-run]');
+  await expect(page.locator('.editor-out .err-box')).toContainText('undefinedVariable');
+  await expect(page.locator('.editor-out .err-box')).toContainText('line 3');
+});
+
+test('TC-SCRIPT-03 sandbox: infinite loops time out, network and cookies are unreachable', async ({ page }) => {
+  await openEditor(page);
+  await page.click('[data-testid=script-new]');
+  await setCode(page, 'while (true) {}');
+  await page.click('[data-testid=script-run]');
+  await expect(page.locator('.editor-out .err-box')).toContainText('Timeout', { timeout: 15_000 });
+  // the page stays responsive
+  expect(await page.evaluate(() => 1 + 1)).toBe(2);
+  await setCode(page, "indicator('x'); plot(close, { title: String(typeof document) + '|' + String(typeof fetch === 'function' ? 'fetch' : 'nofetch') + '|' + String(typeof parent) })");
+  await page.click('[data-testid=script-run]');
+  await expect(page.locator('.editor-out .ok-box')).toContainText('undefined|');
+  // fetch exists in a worker, but the sandbox CSP blocks it and there are no cookies
+  await setCode(page, "indicator('x'); fetch('/api/me').then(()=>{}); plot(close)");
+  await page.click('[data-testid=script-run]');
+  await expect(page.locator('.editor-out .ok-box')).toBeVisible();
+});
+
+test('TC-SCRIPT-04 SqueezeWt port renders in its own pane with signals', async ({ page }) => {
+  const errors = trackErrors(page);
+  const r = await page.evaluate(async (code) => {
+    const res = await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SqueezeWt e2e', code }) });
+    return (await res.json()).script;
+  }, example('squeezewt.js'));
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.view.length > 50);
+  await page.evaluate((id) => __app.addIndicator('custom', { script_id: id }), r.id);
+  await page.waitForFunction(() => __app.ind.items.some(i => i.res.name === 'SqueezeWt' && i.res.plots));
+  const info = await page.evaluate(() => { const it = __app.ind.items.find(i => i.res.name === 'SqueezeWt'); return { pane: it.pane, plots: it.res.plots.length, shapes: it.res.shapes.length, inputs: it.res.inputs.length }; });
+  expect(info).toEqual({ pane: 1, plots: 13, shapes: 2, inputs: 24 });
+  await expect(page.locator('.pane-legend')).toContainText('SqueezeWt 20 2 20 1.5 14 3 3 3 14 14 close 60 21 14 1.9 -1.3 10 21 0.015 60 53 -60 -53');
+  await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
+  expect(errors).toEqual([]);
+});
+
+test('TC-SCRIPT-05 ALL SMAs port uses 4H security() data and fill()', async ({ page }) => {
+  const r = await page.evaluate(async (code) => {
+    const res = await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'ALL SMAs e2e', code }) });
+    return (await res.json()).script;
+  }, example('all-smas.js'));
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.view.length > 50);
+  await page.evaluate((id) => __app.addIndicator('custom', { script_id: id }), r.id);
+  await page.waitForFunction(() => __app.ind.items.some(i => i.res.name?.startsWith('ALL SMAs') && (i.res.plots || i.res.error)), null, { timeout: 30_000 });
+  const info = await page.evaluate(() => {
+    const it = __app.ind.items.find(i => i.res.name?.startsWith('ALL SMAs'));
+    const p = (t) => it.res.plots.find(x => x.title === t).data;
+    return { err: it.res.error, overlay: it.res.overlay, fills: it.res.fills.length, ma4h: p('4h 21 MA').filter(v => v != null).length, n: __app.S.view.length };
+  });
+  expect(info.err).toBeUndefined();
+  expect(info.overlay).toBe(true);
+  expect(info.fills).toBe(1);
+  expect(info.ma4h).toBeGreaterThan(info.n * 0.5);
+  await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
+});

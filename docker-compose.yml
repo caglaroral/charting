@@ -1,0 +1,27 @@
+# docker compose up -d --build   ->  http://<host>:8080
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+    # Mount .env so SECRET_KEY generated on first start is persisted on the host
+    volumes:
+      - ./.env:/app/.env
+    restart: unless-stopped
+    # Optional: lets the indicator sandbox run user code without network access (unshare --net).
+    # cap_add: [SYS_ADMIN]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

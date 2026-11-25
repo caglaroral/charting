@@ -1,0 +1,70 @@
+# Administration
+
+All admin screens are in the **user menu** (top right) of an admin account.
+
+## Data sources (ClickHouse)
+
+*Data Sources (ClickHouse)* lists the sources the charts read history from.
+
+1. **New source** → name, **symbol prefix** (symbols appear as `PREFIX:SYMBOL`), server IP/host,
+   port (8123), user and password → **Test connection** lists the databases.
+2. Pick the database → **Scan tables** finds tables with OHLC columns and guesses the timeframe from
+   the name (`…_1m_…`, `…_1h_…`, `…_1d_…`).
+3. Tick one table per timeframe and check the **column mapping** (symbol, time, open, high, low,
+   close, volume). The time column must be `DateTime`/`DateTime64`.
+4. **Live data**: Binance USDT-M Futures / Binance Spot / none.
+
+Missing timeframes are aggregated from the largest smaller table that divides them (e.g. 30m from
+15m, 1W from 1D). Passwords are stored encrypted with `SECRET_KEY` (generated into `.env` on first
+use — keep it, or stored passwords cannot be decrypted).
+
+The application's own database (`CH_URL`, `CH_USER`, `CH_PASSWORD`, `CH_APP_DB` in `.env`) is
+configured in the environment because it is needed before anyone can log in.
+
+## Users
+
+*Users* creates local users, assigns plans and admin rights. CLI alternatives:
+
+```bash
+python3 server.py adduser <name> [--admin]   # docker compose exec backend python3 server.py …
+python3 server.py passwd <name>
+python3 server.py users
+```
+
+## Subscription plans
+
+*Plans* edits the limits of each plan (empty = unlimited). Defaults:
+
+| Limit | Free | Pro | Premium | Unlimited |
+| --- | --- | --- | --- | --- |
+| Active alerts | 5 | 50 | 400 | ∞ |
+| Indicator alerts | ✓ | ✓ | ✓ | ✓ |
+| Custom indicator alerts | – | ✓ | ✓ | ✓ |
+| Notification channels | app, telegram | all | all | all |
+| Alert evaluation interval | 60 s | 20 s | 20 s | 20 s |
+| Custom indicators | 3 | 25 | 100 | ∞ |
+| Watchlists / symbols per list | 2 / 30 | 10 / 200 | 50 / 1000 | ∞ |
+| Indicators per chart | 5 | 15 | 30 | ∞ |
+
+Users without a plan get *free*; admins without a plan get *unlimited*. Limits are enforced by the API
+(HTTP 402 with a readable message) and by the alert engine (a downgraded user's oldest alerts keep
+running up to the limit).
+
+## Notification servers
+
+SMTP (host, port, STARTTLS/SSL/none, user, password, from) and the Telegram bot token
+(create one with @BotFather). Secrets are stored encrypted.
+
+## Configuration (`.env`)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CH_URL`, `CH_USER`, `CH_PASSWORD` | | ClickHouse HTTP endpoint for the app database (and the initial data source) |
+| `CH_APP_DB` | `charting` | application database |
+| `CH_MARKET_DB` | `default` | database of the initial `BINANCE` source |
+| `HOST`, `PORT` | `0.0.0.0`, `8080` | backend listen address |
+| `AUTH_MODE` | `local` | `local`, `header`, `none` (see SECURITY.md) |
+| `AUTH_HEADER_USER/EMAIL/PROVIDER` | | header mode settings |
+| `SESSION_DAYS` | `30` | session lifetime |
+| `SECRET_KEY` | generated | encryption key for stored secrets |
+| `APP_PORT` (compose) | `8080` | published port of the frontend container |

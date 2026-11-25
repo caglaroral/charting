@@ -1,0 +1,93 @@
+// TC-CHART: live data, timeframes, chart types, timezone, scale, history from ClickHouse
+import { test, expect } from '@playwright/test';
+import { login, trackErrors, resetLayout } from '../helpers.js';
+
+test.beforeEach(async ({ page }) => { await login(page); });
+
+test('TC-CHART-01 chart loads exchange bars through one REST call and one websocket', async ({ page }) => {
+  const s = await page.evaluate(() => ({ n: __app.S.bars.length, src: __app.S.dataSource, ws: __app.liveConnections() }));
+  expect(s.n).toBeGreaterThan(100);
+  expect(s.src).toMatch(/Binance/);
+  expect(s.ws).toBe(1);
+  await expect(page.locator('#lg-ohlc')).toContainText('O ');
+});
+
+test('TC-CHART-02 timeframe buttons and the full timeframe menu switch data', async ({ page }) => {
+  await page.click('.tf-btn[data-tf="15m"]');
+  await page.waitForFunction(() => __app.S.tf === '15m' && __app.S.bars.length > 50 && __app.S.bars[1].time - __app.S.bars[0].time === 900);
+  await page.click('#tf-more button');
+  await page.click('[data-testid="tf-menu-4h"]');
+  await page.waitForFunction(() => __app.S.tf === '4h' && __app.S.bars.length > 50 && __app.S.bars[1].time - __app.S.bars[0].time === 14400);
+  await page.click('.tf-btn[data-tf="1h"]');
+  await page.waitForFunction(() => __app.S.tf === '1h');
+});
+
+test('TC-CHART-03 every chart type renders without errors', async ({ page }) => {
+  const errors = trackErrors(page);
+  const types = ['bars', 'candles', 'hollow', 'volcandles', 'line', 'linemarkers', 'stepline', 'area', 'hlcarea', 'baseline', 'columns', 'highlow', 'heikin', 'renko', 'linebreak'];
+  for (const t of types) {
+    await page.click('#charttype-btn');
+    await page.click(`[data-testid="ct-${t}"]`);
+    await page.waitForFunction((x) => __app.S.chartType === x && __app.S.view.length > 0, t);
+  }
+  const renko = await page.evaluate(() => { __app.S.chartType = 'renko'; __app.refreshView(); return __app.S.view.every(b => Math.abs(Math.abs(b.close - b.open) - Math.abs(__app.S.view[0].close - __app.S.view[0].open)) < 1e-6); });
+  expect(renko).toBe(true);
+  await page.click('#charttype-btn');
+  await page.click('[data-testid="ct-candles"]');
+  expect(errors).toEqual([]);
+});
+
+test('TC-CHART-04 timezone list and selection shift the axis', async ({ page }) => {
+  await page.click('#tz-btn');
+  expect(await page.locator('.dd-menu .dd-item').count()).toBeGreaterThan(60);
+  await page.click('.dd-menu .dd-item:has-text("UTC")');
+  await page.waitForFunction(() => __app.S.tzOffset === 0);
+  await expect(page.locator('#tz-btn')).toHaveText('UTC');
+  await page.click('#tz-btn');
+  await page.click('[data-testid="tz-Tokyo"]');
+  await page.waitForFunction(() => __app.S.tzOffset === 9 * 3600);
+});
+
+test('TC-CHART-05 log and auto scale toggles (A / L)', async ({ page }) => {
+  await page.click('#sb-log');
+  expect(await page.evaluate(() => __app.chart.priceScale('right').options().mode)).toBe(1);
+  await expect(page.locator('#sb-log')).toHaveClass(/active/);
+  await page.click('#sb-log');
+  expect(await page.evaluate(() => __app.chart.priceScale('right').options().mode)).toBe(0);
+  await page.click('#sb-auto');
+  expect(await page.evaluate(() => __app.chart.priceScale('right').options().autoScale)).toBe(false);
+  await page.click('#sb-auto');
+  expect(await page.evaluate(() => __app.chart.priceScale('right').options().autoScale)).toBe(true);
+});
+
+test('TC-CHART-06 scrolling back loads older bars from ClickHouse', async ({ page }) => {
+  const before = await page.evaluate(() => __app.S.bars[0].time);
+  await page.evaluate(() => __app.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 100 }));
+  await page.waitForFunction((t) => __app.S.bars[0].time < t, before, { timeout: 30_000 });
+});
+
+test('TC-CHART-07 symbol without ClickHouse history warns "No data on ClickHouse"', async ({ page }) => {
+  const sym = await page.evaluate(() => (__app.S.symbols.find(s => s.live && !s.history) || {}).symbol);
+  test.skip(!sym, 'every live symbol has history');
+  await page.evaluate((s) => __app.setSymbol(s), sym);
+  await page.waitForFunction((s) => __app.S.symbol === s && __app.S.bars.length > 0, sym);
+  await page.evaluate(() => { __app.S.exhausted = false; __app.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 50 }); });
+  await expect(page.locator('.toast', { hasText: 'No data on ClickHouse' })).toBeVisible();
+});
+
+test('TC-CHART-08 typing opens symbol search and Enter switches symbol', async ({ page }) => {
+  await page.locator('#chart').click({ position: { x: 300, y: 200 } });
+  await page.keyboard.type('ETHUSDT');
+  await expect(page.locator('[data-testid=symbol-search]')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => __app.S.symbol === 'BINANCE:ETHUSDT' && __app.S.bars.length > 0);
+  await expect(page.locator('#symbol-label')).toHaveText('ETHUSDT');
+  await page.evaluate(() => __app.setSymbol('BINANCE:BTCUSDT'));
+});
+
+test.afterAll(async ({ browser }) => {
+  const p = await browser.newPage();
+  await login(p);
+  await resetLayout(p);
+  await p.close();
+});
