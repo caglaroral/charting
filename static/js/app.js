@@ -176,6 +176,8 @@ async function start() {
     wlId: L.wlId || null,
     rightPanel: L.rightPanel !== false,
     scaleMode: L.scaleMode || 0,
+    autoScale: L.autoScale !== false,
+    mainPos: Number(L.mainPos) || 0,
     lastTool: L.lastTool || {},
     style: { ...DEFAULT_STYLE, ...(L.style && typeof L.style === 'object' ? L.style : {}) },
   });
@@ -200,8 +202,8 @@ async function start() {
 
 app.saveLayout = debounce(() => {
   api.setSetting('layout', {
-    symbol: S.symbol, tf: S.tf, chartType: S.chartType, indicators: S.indicators.map(i => ({ id: i.id, type: i.type, script_id: i.script_id, params: i.params, colors: i.colors, visible: i.visible })),
-    tz: S.tz, magnet: S.magnet, keepDrawing: S.keepDrawing, lastTool: S.lastTool, cursorMode: app.dm?.cursorMode, favTfs: S.favTfs, wlId: S.wlId, rightPanel: S.rightPanel, scaleMode: S.scaleMode,
+    symbol: S.symbol, tf: S.tf, chartType: S.chartType, indicators: S.indicators.map(i => ({ id: i.id, type: i.type, script_id: i.script_id, params: i.params, colors: i.colors, visible: i.visible, scale: i.scale, collapsed: i.collapsed })),
+    tz: S.tz, magnet: S.magnet, keepDrawing: S.keepDrawing, lastTool: S.lastTool, cursorMode: app.dm?.cursorMode, favTfs: S.favTfs, wlId: S.wlId, rightPanel: S.rightPanel, scaleMode: S.scaleMode, autoScale: S.autoScale, mainPos: S.mainPos || 0,
     style: S.style,
   }).catch(e => console.warn('layout save failed', e));
 }, 800);
@@ -246,13 +248,25 @@ function createChart() {
   });
   new ResizeObserver(() => positionPaneLegends()).observe(container);
   const sb = el('div', { class: 'scale-btns', id: 'scale-btns' },
-    el('button', { class: 'scale-btn', id: 'sb-auto', title: 'Auto (fits data to screen)', onclick: () => { S.autoScale = !S.autoScale; applyScaleMode(); } }, 'A'),
+    el('button', { class: 'scale-btn', id: 'sb-auto', title: 'Auto (fits data to screen)', onclick: () => { S.autoScale = !S.autoScale; applyScaleMode(); app.saveLayout(); } }, 'A'),
     el('button', { class: 'scale-btn', id: 'sb-log', title: 'Logarithmic', onclick: () => { S.scaleMode = S.scaleMode === 1 ? 0 : 1; applyScaleMode(); app.saveLayout(); } }, 'L'));
   $('#chartwrap').append(sb);
+  applyScaleMode();
+  // TradingView's "Scroll to the most recent bar" button: shown while the newest bar is off screen
+  const recent = el('button', { class: 'scroll-recent', id: 'btn-scroll-recent', hidden: true, 'data-testid': 'scroll-recent',
+    title: 'Scroll to the most recent bar (Alt+Shift+→)', onclick: () => app.scrollToRecent(),
+    html: '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l6 6-6 6M12 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>' });
+  $('#chartwrap').append(recent);
+  app.chart.timeScale().subscribeVisibleLogicalRangeChange(updateScrollRecent); // buttons exist only now: show the restored A / L state
   // Dragging the price axis turns auto scale off in the library; mirror that state in the buttons.
   container.addEventListener('pointerup', () => setTimeout(() => {
-    const auto = app.chart.priceScale('right').options().autoScale;
-    if (auto !== S.autoScale) { S.autoScale = auto; applyScaleMode(); }
+    const auto = app.chart.priceScale('right', mainIdx()).options().autoScale;
+    if (auto !== S.autoScale) { S.autoScale = auto; applyScaleMode(); app.saveLayout(); }
+    for (const it of app.ind.items) {
+      if (!it.own) continue;
+      const a = app.chart.priceScale('right', it.pane).options().autoScale;
+      if (a !== paneScale(it.inst).auto) { it.inst.scale = { ...paneScale(it.inst), auto: a }; renderPaneScaleBtns(); app.saveLayout(); }
+    }
   }, 0));
 }
 
@@ -273,10 +287,15 @@ app.applyStyle = () => {
   refreshIndicators(true); app.dm.update();
 };
 
+/** Index of the price pane; indicator panes can be moved above it. */
+const mainIdx = () => { try { return app.mainSeries ? app.mainSeries.getPane().paneIndex() : 0; } catch { return 0; } };
+app.mainPaneIndex = mainIdx;
+
 const alpha = (hex, a) => (/^#[0-9a-f]{6}$/i.test(hex) ? hex + a : hex);
 
 function makeMainSeries() {
   const c = app.chart;
+  if (app.mainSeries && mainIdx() !== 0) app.mainSeries.getPane().moveTo(0); // new series is created in pane 0
   if (app.mainSeries) { c.removeSeries(app.mainSeries); app.mainSeries = null; }
   for (const x of app.extraMain || []) c.removeSeries(x);
   app.extraMain = [];
@@ -377,7 +396,8 @@ function applyPriceFormat() {
 }
 
 function applyScaleMode() {
-  app.chart.priceScale('right').applyOptions({ mode: S.scaleMode, autoScale: S.autoScale });
+  app.chart.priceScale('right', mainIdx()).applyOptions({ mode: S.scaleMode, autoScale: S.autoScale });
+  resetPaneScales();
   $('#btn-log')?.classList.toggle('active', S.scaleMode === 1);
   $('#btn-pct')?.classList.toggle('active', S.scaleMode === 2);
   $('#btn-auto')?.classList.toggle('active', S.autoScale);
@@ -386,16 +406,82 @@ function applyScaleMode() {
   positionScaleBtns();
 }
 
+// Every indicator pane has its own A (auto) / L (log) state, stored with the indicator. New panes
+// copy the main scale's options, so the state is always applied explicitly (default: normal, auto).
+const paneScale = (inst) => ({ log: false, auto: true, ...(inst.scale || {}) });
+
+function resetPaneScales() {
+  for (const it of app.ind.items) {
+    if (!it.own) continue;
+    const sc = paneScale(it.inst);
+    try { app.chart.priceScale('right', it.pane).applyOptions({ mode: sc.log ? 1 : 0, autoScale: sc.auto }); } catch { /* pane gone */ }
+  }
+  renderPaneScaleBtns();
+}
+
+function setPaneScale(it, patch) {
+  it.inst.scale = { ...paneScale(it.inst), ...patch };
+  resetPaneScales();
+  app.saveLayout();
+}
+
+function renderPaneScaleBtns() {
+  for (const d of document.querySelectorAll('.pane-scale-btns')) d.remove();
+  for (const it of app.ind.items) {
+    if (!it.own) continue;
+    const sc = paneScale(it.inst);
+    $('#chartwrap').append(el('div', { class: 'scale-btns pane-scale-btns', 'data-pane': it.pane, 'data-ind': it.inst.id },
+      el('button', { class: `scale-btn ${sc.auto ? 'active' : ''}`, title: 'Auto (fits data to screen)', 'data-testid': 'pane-auto', onclick: () => setPaneScale(it, { auto: !sc.auto }) }, 'A'),
+      el('button', { class: `scale-btn ${sc.log ? 'active' : ''}`, title: 'Logarithmic', 'data-testid': 'pane-log', onclick: () => setPaneScale(it, { log: !sc.log }) }, 'L')));
+  }
+  requestAnimationFrame(positionPaneLegends);
+}
+
+// With auto scale off the price range is whatever it was before: right after a reload or a symbol
+// change that is no range for the new data (blank chart, worse in log mode). Fit the new data once,
+// then return to the user's manual (auto off) mode, like TradingView.
+function fitPriceScaleOnce() {
+  if (S.autoScale) return;
+  const ps = app.chart.priceScale('right', mainIdx());
+  ps.applyOptions({ autoScale: true });
+  requestAnimationFrame(() => requestAnimationFrame(() => { if (!S.autoScale) ps.applyOptions({ autoScale: false }); }));
+}
+
+app.scrollToRecent = () => app.chart.timeScale().scrollToRealTime();
+
+function updateScrollRecent() {
+  const b = $('#btn-scroll-recent');
+  if (!b) return;
+  const r = app.chart.timeScale().getVisibleLogicalRange();
+  b.hidden = !r || !S.view.length || r.to >= S.view.length - 1;
+  if (!b.hidden) positionScaleBtns();
+}
+
 function positionScaleBtns() {
   const b = $('#scale-btns');
   if (!b || !app.chart) return;
-  const w = app.chart.priceScale('right').width();
+  const w = app.chart.priceScale('right', mainIdx()).width();
   const panes = app.chart.panes();
-  const main = panes[0]?.getHTMLElement();
+  const main = panes[mainIdx()]?.getHTMLElement();
   const base = $('#chart').getBoundingClientRect();
   const bottom = main ? main.getBoundingClientRect().bottom - base.top : base.height - 30;
   b.style.left = `${base.width - w + Math.max(2, (w - 44) / 2)}px`;
   b.style.top = `${bottom - 24}px`;
+  const rb = $('#btn-scroll-recent');
+  if (rb) { // bottom-right of the chart, just above the time axis, left of the price scale
+    const last = panes[panes.length - 1]?.getHTMLElement();
+    const lb = last ? last.getBoundingClientRect().bottom - base.top : base.height - 30;
+    rb.style.left = `${base.width - w - 36}px`;
+    rb.style.top = `${lb - 34}px`;
+  }
+  for (const d of document.querySelectorAll('.pane-scale-btns')) {
+    const e = panes[Number(d.dataset.pane)]?.getHTMLElement();
+    const r = e && e.getBoundingClientRect();
+    d.hidden = !r || r.height < 60;
+    if (!r) continue;
+    d.style.left = b.style.left;
+    d.style.top = `${r.bottom - base.top - 24}px`;
+  }
 }
 
 // S.bars = time-based source bars. S.view = bars shown on the chart (Renko/Line break transform them).
@@ -494,6 +580,7 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     app.htfCache.clear();
     applyPriceFormat();
     setMainData();
+    fitPriceScaleOnce();
     app.dm.setDrawings(dr.drawings);
     showMsg(S.bars.length ? '' : 'No data for this symbol/timeframe');
     const n = S.view.length;
@@ -734,7 +821,8 @@ export async function refreshIndicators(force = false) {
   if (token !== app.ind.token) return;
   const items = insts.map((inst, i) => ({ inst, res: results[i] }));
   const sig = sigOf(items);
-  const rebuild = force || sig !== app.ind.sig;
+  // re-creating the price series (chart type, style, symbol load) puts its pane back on top
+  const rebuild = force || sig !== app.ind.sig || mainIdx() !== (app.ind.mainAt || 0);
   if (rebuild) rebuildIndicatorSeries(items);
   else updateIndicatorData(items);
   app.ind.sig = sig;
@@ -846,6 +934,7 @@ function clearIndicatorSeries() {
     for (const s of it.series || []) { try { app.chart.removeSeries(s); } catch { /* */ } }
   }
   app.ind.items = [];
+  if (app.mainSeries && mainIdx() !== 0) app.mainSeries.getPane().moveTo(0);
   while (app.chart.panes().length > 1) app.chart.removePane(app.chart.panes().length - 1);
 }
 
@@ -854,11 +943,12 @@ function rebuildIndicatorSeries(items) {
   clearIndicatorSeries();
   let paneIdx = 0;
   for (const { inst, res } of items) {
-    const it = { inst, res, series: [], markers: [], pane: null };
+    const it = { inst, res, series: [], markers: [], pane: null, own: false };
     app.ind.items.push(it);
     if (!inst.visible || res.error) continue;
     const pane = res.overlay ? 0 : ++paneIdx;
     it.pane = pane;
+    it.own = pane > 0;
     const scaleId = res.volume ? `vol_${inst.id}` : 'right';
     for (const p of res.plots) {
       const common = { priceScaleId: scaleId, lastValueVisible: !res.volume, priceLineVisible: false, title: '', crosshairMarkerVisible: !res.volume };
@@ -894,8 +984,30 @@ function rebuildIndicatorSeries(items) {
       if (target) it.markers.push(LWC.createSeriesMarkers(target, markersFor(res)));
     }
   }
-  if (!app.ind.items.some(x => x.inst.id === app.maxPane && x.pane > 0)) app.maxPane = null;
+  // Price pane position among the panes (indicator panes moved above it).
+  // S.mainPos itself is kept: an early run before data arrives may have fewer panes.
+  app.ind.mainAt = Math.max(0, Math.min(S.mainPos || 0, paneIdx));
+  if (!app.ind.items.some(x => x.inst.id === app.maxPane && x.own)) app.maxPane = null;
+  placeMainPane();
+}
+
+// Panes created in this tick are not known to the chart model until it lays them out
+// ("Invalid pane index"), so the move is retried on the next frames.
+function placeMainPane(tries = 0) {
+  const want = app.ind.mainAt || 0;
+  if (app.mainSeries && mainIdx() !== want) {
+    try { app.mainSeries.getPane().moveTo(want); } catch (e) {
+      if (tries < 10) { requestAnimationFrame(() => placeMainPane(tries + 1)); return; }
+      console.warn('pane move failed', e);
+    }
+  }
+  for (const it of app.ind.items) {
+    if (it.own && it.series[0]) it.pane = it.series[0].getPane().paneIndex();
+    else if (!it.own && it.series.length) it.pane = mainIdx();
+  }
+  resetPaneScales();
   applyPaneStretch();
+  if (tries) renderLegend(); // pane indices changed after the legend was drawn
 }
 
 function updateIndicatorData(items) {
@@ -928,6 +1040,9 @@ export function addIndicator(type, extra = {}) {
 app.addIndicator = addIndicator;
 
 app.removeIndicator = (id) => {
+  // a pane above the price pane disappears: the price pane moves up one slot
+  const seq = paneOrder(), k = seq.findIndex(x => x !== 'main' && x.id === id);
+  if (k >= 0 && k < seq.indexOf('main')) S.mainPos = Math.max(0, (S.mainPos || 0) - 1);
   S.indicators = S.indicators.filter(i => i.id !== id);
   app.saveLayout();
   refreshIndicators();
@@ -946,20 +1061,43 @@ function paramsText(inst, res) {
   return '';
 }
 
+// Visual pane order: indicator panes in S.indicators order with the price pane ('main') at S.mainPos.
+function paneOrder() {
+  const own = S.indicators.filter(i => app.ind.items.find(it => it.inst === i)?.own);
+  const seq = own.slice();
+  seq.splice(Math.min(S.mainPos || 0, own.length), 0, 'main');
+  return seq;
+}
+
+function canMovePane(inst, dir) {
+  const seq = paneOrder(), k = seq.indexOf(inst);
+  return k >= 0 && k + dir >= 0 && k + dir < seq.length;
+}
+
 function moveIndicatorPane(inst, dir) {
-  // reorder among non-overlay indicators -> pane order follows S.indicators order
-  const list = S.indicators;
-  const paned = list.filter(i => app.ind.items.find(it => it.inst === i)?.pane > 0);
-  const k = paned.indexOf(inst), j = k + dir;
-  if (k < 0 || j < 0 || j >= paned.length) return;
-  const ia = list.indexOf(inst), ib = list.indexOf(paned[j]);
-  [list[ia], list[ib]] = [list[ib], list[ia]];
+  const seq = paneOrder(), k = seq.indexOf(inst), j = k + dir;
+  if (k < 0 || j < 0 || j >= seq.length) return;
+  [seq[k], seq[j]] = [seq[j], seq[k]];
+  S.mainPos = seq.indexOf('main');
+  // keep the indicators' own order in S.indicators (overlays stay where they are)
+  const own = seq.filter(x => x !== 'main');
+  let n = 0;
+  S.indicators = S.indicators.map(i => (own.includes(i) ? own[n++] : i));
   app.saveLayout();
   refreshIndicators(true);
 }
 
+function toggleCollapse(it) {
+  it.inst.collapsed = !it.inst.collapsed;
+  if (it.inst.collapsed && app.maxPane === it.inst.id) app.maxPane = null;
+  app.saveLayout();
+  applyPaneStretch();
+  renderLegend();
+}
+
 function toggleMaximize(it) {
   app.maxPane = app.maxPane === it.inst.id ? null : it.inst.id;
+  if (app.maxPane) it.inst.collapsed = false;
   applyPaneStretch();
   renderLegend();
 }
@@ -967,17 +1105,23 @@ function toggleMaximize(it) {
 function applyPaneStretch() {
   const panes = app.chart.panes();
   if (panes.length < 2) return;
-  const maxIt = app.ind.items.find(x => x.inst.id === app.maxPane && x.pane > 0);
+  const maxIt = app.ind.items.find(x => x.inst.id === app.maxPane && x.own);
+  const m = mainIdx();
+  const collapsed = new Set(app.ind.items.filter(x => x.own && x.inst.collapsed).map(x => x.pane));
+  const open = panes.length - collapsed.size;
+  const total = panes.reduce((a, p) => a + p.getHeight(), 0) || $('#chart').clientHeight;
+  const unit = total / Math.max(1, open + (open > 1 ? 1.2 : 0));
   for (let i = 0; i < panes.length; i++) {
     if (maxIt) panes[i].setStretchFactor(i === maxIt.pane ? 1 : 0.0001);
-    else panes[i].setStretchFactor(i === 0 ? Math.max(2, 3.2 - 0.3 * (panes.length - 2)) : 1);
+    else if (collapsed.has(i)) panes[i].setStretchFactor(28 / unit); // just the legend row stays visible
+    else panes[i].setStretchFactor(i === m ? Math.max(2, 3.2 - 0.3 * (panes.length - 2)) : 1);
   }
   requestAnimationFrame(positionPaneLegends);
 }
 
 function legendKey() {
-  return JSON.stringify([S.symbol, S.tf, S.dataSource, app.maxPane, app.ind.items.map(({ inst, res }) =>
-    [inst.id, inst.visible, res.name, res.error, paramsText(inst, res), inst.script_id])]);
+  return JSON.stringify([S.symbol, S.tf, S.dataSource, app.maxPane, S.mainPos, app.ind.items.map(({ inst, res, pane }) =>
+    [inst.id, inst.visible, res.name, res.error, paramsText(inst, res), inst.script_id, inst.collapsed, pane])]);
 }
 
 function renderLegend() {
@@ -991,7 +1135,6 @@ function renderLegend() {
     el('span', { class: 'lg-sym' }, app.symbolName(S.symbol)),
     el('span', { class: 'muted' }, `${TF_NAME[S.tf]} · ${S.dataSource || info?.source || ''}`),
     el('span', { class: 'lg-ohlc', id: 'lg-ohlc' })));
-  const paneCount = app.ind.items.filter(x => x.pane > 0).length;
   for (const it of app.ind.items) {
     const { inst, res } = it;
     const row = el('div', { class: `lg-ind ${inst.visible ? '' : 'off'}`, 'data-ind': inst.id });
@@ -999,13 +1142,17 @@ function renderLegend() {
     const ptxt = paramsText(inst, res);
     row.append(el('span', { class: 'lg-name', title: res.error ? '' : res.name }, (res.name || inst.type) + (ptxt ? ' ' + ptxt : '')), vals);
     if (res.error) vals.append(el('span', { class: 'err', title: res.error }, '⚠ ' + res.error.slice(0, 80)));
-    const isPane = it.pane > 0;
+    const isPane = it.own;
     const more = el('button', { class: 'lg-act', title: 'More', html: ICONS.dots.replace(/18/g, '14'), onclick: (e) => showMenu(e.currentTarget, [
       ...(!res.error && res.plots ? [{ label: 'Add alert…', testid: 'ind-alert', onClick: () => dialogs.alertDialog(app, { kind: 'indicator', inst }) }] : []),
       { label: 'Settings…', onClick: () => dialogs.indicatorSettings(app, inst) },
       ...(inst.type === 'custom' ? [{ label: 'Source code…', onClick: () => dialogs.scriptEditor(app, inst.script_id) }] : []),
       { label: 'Duplicate', onClick: () => app.addIndicator(inst.type, { script_id: inst.script_id, params: { ...(inst.params || {}) }, colors: { ...(inst.colors || {}) } }) },
-      ...(isPane ? [{ sep: true }, { label: 'Move pane up', onClick: () => moveIndicatorPane(inst, -1) }, { label: 'Move pane down', onClick: () => moveIndicatorPane(inst, 1) }, { label: app.maxPane === inst.id ? 'Restore pane' : 'Maximize pane', onClick: () => toggleMaximize(it) }] : []),
+      ...(isPane ? [{ sep: true },
+        ...(canMovePane(inst, -1) ? [{ label: 'Move pane up', onClick: () => moveIndicatorPane(inst, -1) }] : []),
+        ...(canMovePane(inst, 1) ? [{ label: 'Move pane down', onClick: () => moveIndicatorPane(inst, 1) }] : []),
+        { label: inst.collapsed ? 'Expand pane' : 'Collapse pane', onClick: () => toggleCollapse(it) },
+        { label: app.maxPane === inst.id ? 'Restore pane' : 'Maximize pane', onClick: () => toggleMaximize(it) }] : []),
       { sep: true },
       { label: inst.visible ? 'Hide' : 'Show', onClick: () => { inst.visible = !inst.visible; app.saveLayout(); refreshIndicators(); } },
       { label: 'Remove', onClick: () => app.removeIndicator(inst.id) },
@@ -1019,11 +1166,13 @@ function renderLegend() {
     row.append(act);
     legendRefs.push({ it, vals: res.error ? null : vals });
     if (isPane) {
+      // TradingView pane buttons: move up / down (only when possible), delete, collapse, maximize
       const ctr = el('div', { class: 'pane-ctrls' },
-        el('button', { class: 'lg-act', title: 'Move pane up', html: ICONS.up, disabled: it.pane === 1, onclick: () => moveIndicatorPane(inst, -1) }),
-        el('button', { class: 'lg-act', title: 'Move pane down', html: ICONS.down, disabled: it.pane === paneCount, onclick: () => moveIndicatorPane(inst, 1) }),
-        el('button', { class: 'lg-act', title: 'Remove', html: ICONS.trash.replace(/16/g, '14'), onclick: () => app.removeIndicator(inst.id) }),
-        el('button', { class: 'lg-act', title: app.maxPane === inst.id ? 'Restore pane' : 'Maximize pane', html: app.maxPane === inst.id ? ICONS.restore : ICONS.maximize, onclick: () => toggleMaximize(it) }));
+        canMovePane(inst, -1) ? el('button', { class: 'lg-act', title: 'Move pane up', 'data-testid': 'pane-up', html: ICONS.up, onclick: () => moveIndicatorPane(inst, -1) }) : null,
+        canMovePane(inst, 1) ? el('button', { class: 'lg-act', title: 'Move pane down', 'data-testid': 'pane-down', html: ICONS.down, onclick: () => moveIndicatorPane(inst, 1) }) : null,
+        el('button', { class: 'lg-act', title: 'Delete pane', 'data-testid': 'pane-delete', html: ICONS.trash.replace(/16/g, '14'), onclick: () => app.removeIndicator(inst.id) }),
+        el('button', { class: 'lg-act', title: inst.collapsed ? 'Expand pane' : 'Collapse pane', 'data-testid': 'pane-collapse', html: inst.collapsed ? ICONS.expand : ICONS.collapse, onclick: () => toggleCollapse(it) }),
+        el('button', { class: 'lg-act', title: app.maxPane === inst.id ? 'Restore pane' : 'Maximize pane', 'data-testid': 'pane-maximize', html: app.maxPane === inst.id ? ICONS.restore : ICONS.maximize, onclick: () => toggleMaximize(it) }));
       $('#pane-legends').append(el('div', { class: 'pane-legend', 'data-pane': it.pane }, row), el('div', { class: 'pane-ctrl-wrap', 'data-pane': it.pane }, ctr));
     } else main.append(row);
   }
@@ -1035,7 +1184,10 @@ function positionPaneLegends() {
   positionScaleBtns();
   const panes = app.chart.panes();
   const base = $('#chart').getBoundingClientRect();
-  const scaleW = app.chart.priceScale('right').width();
+  const scaleW = app.chart.priceScale('right', mainIdx()).width();
+  // the price legend follows the price pane when indicator panes are moved above it
+  const mainEl = panes[mainIdx()]?.getHTMLElement();
+  if (mainEl) $('#legend').style.top = (mainEl.getBoundingClientRect().top - base.top + 6) + 'px';
   for (const d of document.querySelectorAll('.pane-legend, .pane-ctrl-wrap')) {
     const p = panes[Number(d.dataset.pane)];
     const e = p && p.getHTMLElement();
@@ -1368,7 +1520,7 @@ function buildBottombar() {
   setInterval(tick, 1000);
   $('#btn-log').onclick = () => { S.scaleMode = S.scaleMode === 1 ? 0 : 1; applyScaleMode(); app.saveLayout(); };
   $('#btn-pct').onclick = () => { S.scaleMode = S.scaleMode === 2 ? 0 : 2; applyScaleMode(); app.saveLayout(); };
-  $('#btn-auto').onclick = () => { S.autoScale = !S.autoScale; applyScaleMode(); };
+  $('#btn-auto').onclick = () => { S.autoScale = !S.autoScale; applyScaleMode(); app.saveLayout(); };
 }
 
 // ======================================================================= keyboard
@@ -1377,6 +1529,7 @@ function bindKeys() {
     const tag = (e.target && e.target.tagName) || '';
     const typing = /INPUT|TEXTAREA|SELECT/.test(tag) || e.target.isContentEditable || document.querySelector('.modal-backdrop');
     if (typing) return;
+    if (e.altKey && e.shiftKey && e.key === 'ArrowRight') { e.preventDefault(); app.scrollToRecent(); return; }
     if (app.dm.onKey(e)) { e.preventDefault(); return; }
     if (e.altKey && e.key.toLowerCase() === 'a') { e.preventDefault(); dialogs.alertDialog(app, { kind: 'price' }); return; }
     if (e.key === '/' ) { e.preventDefault(); dialogs.indicatorPicker(app); return; }

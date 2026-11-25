@@ -21,38 +21,6 @@ plotshape(ta.crossover(f, s), { title: 'Buy', location: 'belowbar', color: '#26a
 plotshape(ta.crossunder(f, s), { title: 'Sell', location: 'abovebar', color: '#ef5350', shape: 'triangledown', text: 'SELL' })
 `;
 
-export const API_DOC = [
-  ['indicator(name, {overlay})', 'Indicator name; overlay:true draws on the price pane'],
-  ['input(title, default, [options])', 'User setting (number/string/bool); input.int/float/bool/string are aliases'],
-  ['input.source(title, "close")', 'Source series picker (open/high/low/close/hl2/hlc3/ohlc4)'],
-  ['plot(series, {title, color, width, style})', 'style: line | histogram | circles | area | cross. color: a color, an array of colors or i => color'],
-  ['hline(value, {color, title})', 'Horizontal level line'],
-  ['fill(seriesA, seriesB, {color})', 'Shade the area between two series; color may be per bar. A null color is invisible (Pine na)'],
-  ['fill(a, b, {topValue, bottomValue, topColor, bottomColor})', 'Vertical gradient fill between two series (Pine gradient fill); colors may be per bar, null = transparent'],
-  ['plotshape(boolSeries, {title, location, color, shape, text})', 'location: abovebar | belowbar | top | bottom; shape: triangleup | triangledown | arrowup | arrowdown | circle | square | diamond'],
-  ['security(tf, s => ...)', 'Compute on another timeframe (e.g. "4h" or "240"). s exposes that timeframe\'s open/close/ta... No lookahead (lookahead_off)'],
-  ['open high low close volume time hl2 hlc3 ohlc4', 'Price series (arrays)'],
-  ['n, bar_index, timeframe, timeframe_sec', 'Bar count, index array, active timeframe'],
-  ['ta.sma/ema/wma/rma(s, len)', 'Moving averages'],
-  ['ta.rsi(s, len), ta.atr(len), ta.tr()', 'RSI, ATR, True Range'],
-  ['ta.stdev(s, len), ta.highest(s, len), ta.lowest(s, len)', 'Statistics'],
-  ['ta.linreg(s, len, offset)', 'Linear regression'],
-  ['ta.mfi(s, len), ta.stoch(s, high, low, len), ta.cci(s, len)', 'Oscillators with Pine signatures'],
-  ['ta.change(s, n=1), ta.mom(s, n), ta.roc(s, n), ta.cum(s)', 'Change'],
-  ['ta.crossover(a, b), ta.crossunder(a, b), ta.cross(a, b)', 'Crosses (bool array); b may be a number'],
-  ['ta.macd(s, 12, 26, 9) → {macd, signal, hist}', ''],
-  ['ta.bb(s, 20, 2) → {upper, basis, lower}', ''],
-  ['ta.supertrend(mult, period) → {line, dir}', ''],
-  ['ta.vwap(), ta.pivothigh(l, r), ta.pivotlow(l, r)', ''],
-  ['ta.valuewhen(cond, s, occ=0), ta.barssince(cond)', ''],
-  ['shift(s, k)', 'Pine s[k]: value k bars ago'],
-  ['add sub mul div max min abs (a, b)', 'Vectorized arithmetic (arrays or numbers)'],
-  ['series(i => ...)', 'Bar-by-bar computation (runs in order; keep state in outer variables = Pine var)'],
-  ['nz(x, y=0), na(x)', 'na handling'],
-  ['color.rgb(r,g,b,transp), color.new(c, transp), color.red ...', 'Pine colors (transp 0-100)'],
-  ['math.abs/max/min/sqrt/log/avg/sum ...', 'Math + avg/sum'],
-];
-
 const isArr = Array.isArray;
 const at = (x, i) => (isArr(x) ? x[i] : x);
 

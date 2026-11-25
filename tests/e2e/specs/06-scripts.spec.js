@@ -92,3 +92,17 @@ test('TC-SCRIPT-05 ALL SMAs port uses 4H security() data and fill()', async ({ p
   expect(info.ma4h).toBeGreaterThan(info.n * 0.5);
   await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
 });
+
+test('TC-SCRIPT-06 the editor opens the ChartScript reference in a new tab', async ({ page, context }) => {
+  await page.click('#btn-editor');
+  await page.waitForFunction(() => window.__cm);
+  await expect(page.locator('.editor-doc')).toHaveCount(0); // no side panel squeezing the editor
+  const link = page.locator('[data-testid=script-docs]');
+  await expect(link).toHaveAttribute('target', '_blank');
+  const [docs] = await Promise.all([context.waitForEvent('page'), link.click()]);
+  await docs.waitForLoadState();
+  await expect(docs.locator('h1')).toHaveText('ChartScript');
+  await expect(docs.locator('#ta')).toBeVisible();
+  await expect(docs.locator('#named-colors tr')).toHaveCount(7);
+  await docs.close();
+});

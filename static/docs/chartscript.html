@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChartScript Reference</title>
+<style>
+  :root {
+    --bg: #131722; --bg2: #1e222d; --bg3: #2a2e39; --border: #2a2e39; --text: #d1d4dc; --muted: #787b86;
+    --accent: #2962ff; --up: #089981; --down: #f23645; --code: #82aaff; --warn: #ff9800;
+    --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif; }
+  a { color: #5b8cff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1280px; margin: 0 auto; }
+  nav { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 20px 14px 40px; border-right: 1px solid var(--border); background: var(--bg); }
+  nav .brand { font-weight: 700; font-size: 15px; margin: 0 8px 14px; }
+  nav .brand span { color: var(--muted); font-weight: 400; display: block; font-size: 12px; }
+  nav input { width: 100%; background: var(--bg2); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 6px 8px; margin-bottom: 10px; font: inherit; font-size: 13px; }
+  nav input:focus { outline: none; border-color: var(--accent); }
+  nav a { display: block; color: var(--muted); padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+  nav a:hover { background: var(--bg2); color: var(--text); text-decoration: none; }
+  nav a.sub { padding-left: 20px; font-size: 12.5px; }
+  nav a.active { color: var(--text); background: var(--bg2); }
+  main { padding: 28px 40px 80px; min-width: 0; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  h2 { font-size: 21px; margin: 44px 0 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 28px 0 8px; }
+  h3 code, h2 code { font-size: .92em; }
+  p, li { color: var(--text); }
+  .lead { color: var(--muted); font-size: 15px; margin: 0 0 18px; }
+  code { font-family: var(--mono); font-size: 12.5px; color: var(--code); background: var(--bg2); padding: 1px 5px; border-radius: 3px; }
+  pre { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; overflow-x: auto; font: 12.5px/1.55 var(--mono); color: var(--text); }
+  pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+  .tk-c { color: #5d6474; font-style: italic; } .tk-s { color: #c3e88d; } .tk-n { color: #f78c6c; } .tk-k { color: #c792ea; } .tk-f { color: #82aaff; }
+  .table-wrap { overflow-x: auto; margin: 10px 0 16px; border: 1px solid var(--border); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--bg2); color: var(--muted); font-weight: 500; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { white-space: nowrap; }
+  td code { white-space: nowrap; }
+  .note, .warn { border-left: 3px solid var(--accent); background: rgba(41,98,255,.08); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 12px 0; }
+  .warn { border-left-color: var(--warn); background: rgba(255,152,0,.08); }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; border: 1px solid #ffffff22; }
+  .kbd { font-family: var(--mono); font-size: 12px; background: var(--bg3); border-radius: 3px; padding: 1px 6px; border-bottom: 2px solid #0006; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid2 > div > pre { margin: 6px 0 0; }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .hidden { display: none !important; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+    main { padding: 20px 16px 60px; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="toc">
+  <div class="brand">ChartScript<span>Custom indicator reference</span></div>
+  <input id="filter" type="search" placeholder="Filter sections…" aria-label="Filter sections">
+  <a href="#overview">Overview</a>
+  <a href="#quickstart">Quick start</a>
+  <a href="#editor" class="sub">The editor</a>
+  <a href="#concepts">Core concepts</a>
+  <a href="#series" class="sub">Series are arrays</a>
+  <a href="#na" class="sub">na / null</a>
+  <a href="#vector" class="sub">Vectorized vs bar by bar</a>
+  <a href="#state" class="sub">State (Pine var)</a>
+  <a href="#declaration">indicator()</a>
+  <a href="#inputs">Inputs</a>
+  <a href="#builtins">Built-in variables</a>
+  <a href="#plotting">Plotting</a>
+  <a href="#plot" class="sub">plot()</a>
+  <a href="#hline" class="sub">hline()</a>
+  <a href="#fill" class="sub">fill()</a>
+  <a href="#plotshape" class="sub">plotshape()</a>
+  <a href="#colors">Colors</a>
+  <a href="#arith">Series helpers</a>
+  <a href="#ta">ta.* reference</a>
+  <a href="#security">Other timeframes</a>
+  <a href="#math">math.*</a>
+  <a href="#alerts">Alerts</a>
+  <a href="#pine">Porting from Pine</a>
+  <a href="#examples">Examples</a>
+  <a href="#limits">Limits &amp; sandbox</a>
+  <a href="#errors">Troubleshooting</a>
+</nav>
+
+<main>
+<h1 id="overview">ChartScript</h1>
+<p class="lead">Write your own indicators in plain JavaScript with a Pine Script-like API. They are stored per user, drawn on
+the chart like built-in indicators and can drive server-side alerts.</p>
+
+<ul>
+  <li>The <b>same runtime</b> draws the indicator in your browser and evaluates alerts on the server, so an alert always sees the values you see on the chart.</li>
+  <li>Code runs <b>isolated</b>: in the browser inside a sandboxed iframe + Web Worker without network access, on the server in an unprivileged sandbox. A bug or an endless loop cannot break the app.</li>
+  <li>Anything JavaScript offers is available: <code>const</code>/<code>let</code>, loops, functions, objects, <code>Math</code>.</li>
+</ul>
+
+<h2 id="quickstart">Quick start</h2>
+<p>Open <b>Editor</b> in the top toolbar, press <b>+ New</b> and you get this template:</p>
+<pre><code class="js">// ChartScript: JavaScript with a Pine-like API. Series are arrays aligned to bars.
+indicator('My Indicator', { overlay: true })
+
+const fast = input('Fast MA', 9)
+const slow = input('Slow MA', 21)
+const source = input.source('Source', 'close')
+
+const f = ta.ema(source, fast)
+const s = ta.ema(source, slow)
+
+plot(f, { title: 'Fast', color: '#2962ff' })
+plot(s, { title: 'Slow', color: '#ff6d00', width: 2 })
+
+plotshape(ta.crossover(f, s), { title: 'Buy', location: 'belowbar', color: '#26a69a', shape: 'triangleup', text: 'BUY' })
+plotshape(ta.crossunder(f, s), { title: 'Sell', location: 'abovebar', color: '#ef5350', shape: 'triangledown', text: 'SELL' })</code></pre>
+<p>Press <b>▶ Run</b> to test it against the current chart, then <b>Save &amp; add to chart</b>.</p>
+
+<h3 id="editor">The editor</h3>
+<div class="table-wrap"><table>
+  <tr><th>Action</th><th>How</th></tr>
+  <tr><td>Run on the current chart</td><td><b>▶ Run</b> or <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span>. Shows plots, shapes, inputs, last values and run time.</td></tr>
+  <tr><td>Save</td><td><b>Save</b> or <span class="kbd">Ctrl</span>+<span class="kbd">S</span>. Instances already on the chart are recomputed.</td></tr>
+  <tr><td>Add to the chart</td><td><b>Save &amp; add to chart</b>, or later from <b>Indicators</b> → <i>My scripts</i>.</td></tr>
+  <tr><td>Comment a line</td><td><span class="kbd">Ctrl</span>+<span class="kbd">/</span></td></tr>
+  <tr><td>Errors</td><td>Syntax and runtime errors are shown under the editor with the line number; the line is highlighted.</td></tr>
+  <tr><td>Edit an indicator on the chart</td><td><code>{ }</code> button in its legend row, or <i>… → Source code</i>.</td></tr>
+</table></div>
+<p>Every <code>input()</code> becomes a field of the indicator's settings dialog (gear in the legend), and every plot gets its own color picker there.</p>
+
+<h2 id="concepts">Core concepts</h2>
+<h3 id="series">Series are arrays</h3>
+<p>A <b>series</b> is a plain JavaScript array with one element per bar, oldest first. <code>close[0]</code> is the oldest loaded bar,
+<code>close[n - 1]</code> the newest (the forming bar). All series have the same length <code>n</code>.</p>
+<div class="warn">This is the opposite of Pine, where <code>close[1]</code> means "one bar ago". In ChartScript use <code>shift(close, 1)</code>
+for a whole series, or <code>close[i - 1]</code> inside a loop.</div>
+
+<h3 id="na">na / null</h3>
+<p>Missing values are <code>null</code> (Pine <code>na</code>). Moving averages return <code>null</code> until they have enough bars;
+functions propagate <code>null</code>. Use <code>na(x)</code> to test and <code>nz(x, y)</code> to replace.</p>
+<div class="warn">JavaScript treats <code>null</code> as <code>0</code> in comparisons: <code>null &lt; 5</code> is <code>true</code>. Where Pine's
+<code>na</code> comparison would be false, guard explicitly: <code>a != null &amp;&amp; b != null &amp;&amp; a &gt; b</code>.</div>
+
+<h3 id="vector">Vectorized vs bar by bar</h3>
+<p>Most functions take and return whole series. Operators like <code>+</code> do not work on arrays, so use the helpers
+or compute bar by bar:</p>
+<div class="grid2">
+  <div><div class="label">Vectorized</div><pre><code class="js">const mid = div(add(high, low), 2)
+const spread = sub(ta.ema(close, 12), ta.ema(close, 26))</code></pre></div>
+  <div><div class="label">Bar by bar</div><pre><code class="js">const mid = series(i =&gt; (high[i] + low[i]) / 2)
+const up = series(i =&gt; close[i] &gt; open[i] ? 1 : 0)</code></pre></div>
+</div>
+<p><code>series(f)</code> calls <code>f(i)</code> for <code>i = 0 … n-1</code> in order and returns an array; <code>undefined</code>/<code>NaN</code> become <code>null</code>.
+A plain <code>for</code> loop that fills an array works just as well.</p>
+
+<h3 id="state">State (Pine <code>var</code>)</h3>
+<p>Because the loop runs from the oldest to the newest bar, a variable declared outside it keeps its value between bars, exactly like Pine's <code>var</code>:</p>
+<pre><code class="js">// Count consecutive up closes (Pine: var int streak = 0)
+let streak = 0
+const streaks = series(i =&gt; {
+  if (i &gt; 0 &amp;&amp; close[i] &gt; close[i - 1]) streak++
+  else streak = 0
+  return streak
+})
+plot(streaks, { title: 'Up streak', style: 'histogram', color: '#26a69a' })</code></pre>
+
+<h2 id="declaration">indicator()</h2>
+<pre><code class="js">indicator('Name shown in the legend', { overlay: true })</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>overlay</code></td><td><code>false</code></td><td><code>true</code> draws on the price pane (moving averages, bands); <code>false</code> opens a separate pane (oscillators).</td></tr>
+</table></div>
+
+<h2 id="inputs">Inputs</h2>
+<p>Inputs are the user-adjustable settings. The type is taken from the default value.</p>
+<div class="table-wrap"><table>
+  <tr><th>Function</th><th>Returns</th><th>Settings field</th></tr>
+  <tr><td><code>input(title, 14)</code></td><td>number</td><td>number box</td></tr>
+  <tr><td><code>input(title, true)</code></td><td>boolean</td><td>checkbox</td></tr>
+  <tr><td><code>input(title, 'text')</code></td><td>string</td><td>text box</td></tr>
+  <tr><td><code>input(title, 'EMA', ['SMA', 'EMA', 'WMA'])</code></td><td>string</td><td>drop-down</td></tr>
+  <tr><td><code>input.select(title, default, options)</code></td><td>string</td><td>drop-down (same as above)</td></tr>
+  <tr><td><code>input.source(title, 'close')</code></td><td>series</td><td>drop-down: open, high, low, close, hl2, hlc3, ohlc4, volume</td></tr>
+  <tr><td><code>input.int</code> / <code>input.float</code> / <code>input.bool</code> / <code>input.string</code></td><td colspan="2">aliases of <code>input</code> for easier Pine porting</td></tr>
+</table></div>
+<pre><code class="js">const len = input('Length', 20)
+const type = input.select('MA type', 'EMA', ['SMA', 'EMA', 'WMA', 'RMA'])
+const src = input.source('Source', 'close')
+const ma = { SMA: ta.sma, EMA: ta.ema, WMA: ta.wma, RMA: ta.rma }[type](src, len)</code></pre>
+<p>Input values are stored per indicator instance, so the same script can be on the chart twice with different settings.</p>
+
+<h2 id="builtins">Built-in variables</h2>
+<div class="table-wrap"><table>
+  <tr><th>Name</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>open high low close volume</code></td><td>series</td><td>bar prices and volume</td></tr>
+  <tr><td><code>hl2 hlc3 ohlc4</code></td><td>series</td><td>(high+low)/2, (high+low+close)/3, (open+high+low+close)/4</td></tr>
+  <tr><td><code>time</code></td><td>series</td><td>bar open time in seconds (shifted to the chart's time zone)</td></tr>
+  <tr><td><code>n</code></td><td>number</td><td>number of bars</td></tr>
+  <tr><td><code>bar_index</code></td><td>series</td><td><code>[0, 1, …, n-1]</code></td></tr>
+  <tr><td><code>timeframe</code></td><td>string</td><td>chart timeframe: <code>1m 3m 5m 15m 30m 1h 2h 4h 12h 1D 1W 1M</code></td></tr>
+  <tr><td><code>timeframe_sec</code></td><td>number</td><td>timeframe length in seconds</td></tr>
+</table></div>
+
+<h2 id="plotting">Plotting</h2>
+<h3 id="plot">plot(series, options)</h3>
+<pre><code class="js">plot(ta.sma(close, 50), { title: 'SMA 50', color: color.orange, width: 2 })
+plot(hist, { title: 'Hist', style: 'histogram', color: i =&gt; hist[i] &gt;= 0 ? color.teal : color.red })</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>Default</th><th>Description</th></tr>
+  <tr><td><code>title</code></td><td><code>'Plot'</code></td><td>legend / settings / alert name. Give every plot a unique title: alerts reference plots by it.</td></tr>
+  <tr><td><code>color</code></td><td>palette</td><td>a color, an array of colors, or <code>i =&gt; color</code> for per-bar colors. <code>null</code> hides that bar (Pine <code>na</code> color).</td></tr>
+  <tr><td><code>width</code></td><td><code>1</code></td><td>line width (alias <code>linewidth</code>); for circles the dot size</td></tr>
+  <tr><td><code>style</code></td><td><code>'line'</code></td><td>see below</td></tr>
+</table></div>
+<div class="table-wrap"><table>
+  <tr><th>style</th><th>Pine</th><th>Drawn as</th></tr>
+  <tr><td><code>line</code></td><td><code>plot.style_line</code>, <code>style_linebr</code></td><td>line; <code>null</code> values break it</td></tr>
+  <tr><td><code>stepline</code></td><td><code>plot.style_stepline</code></td><td>step line</td></tr>
+  <tr><td><code>histogram</code> / <code>columns</code></td><td><code>plot.style_histogram</code>, <code>style_columns</code></td><td>bars from zero</td></tr>
+  <tr><td><code>area</code></td><td><code>plot.style_area</code></td><td>filled to zero with one flat color</td></tr>
+  <tr><td><code>circles</code> / <code>cross</code></td><td><code>plot.style_circles</code>, <code>style_cross</code></td><td>dots only</td></tr>
+</table></div>
+
+<h3 id="hline">hline(value, options)</h3>
+<pre><code class="js">hline(70, { color: color.red, title: 'Overbought' })
+hline(30, { color: color.green, title: 'Oversold' })</code></pre>
+<p>A dashed horizontal level. For a solid level line or one that changes over time use <code>plot(70, {...})</code>: a number is expanded to a constant series.</p>
+
+<h3 id="fill">fill(a, b, options)</h3>
+<p>Shades the area between two series (they do not need to be plotted). Two forms:</p>
+<div class="grid2">
+  <div><div class="label">Solid</div><pre><code class="js">const bb = ta.bb(close, 20, 2)
+fill(bb.upper, bb.lower, {
+  color: color.new(color.blue, 85),
+})</code></pre></div>
+  <div><div class="label">Gradient (Pine 6-argument fill)</div><pre><code class="js">// colored at the band, transparent at the MA
+fill(band, ma, {
+  topValue: band, bottomValue: ma,
+  topColor: color.new('#54b6d4', 60),
+  bottomColor: null,
+})</code></pre></div>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>Description</th></tr>
+  <tr><td><code>color</code></td><td>solid fill; color, array or <code>i =&gt; color</code>; <code>null</code> leaves a bar unfilled</td></tr>
+  <tr><td><code>topValue</code>, <code>bottomValue</code></td><td>series (or numbers) where the gradient starts and ends</td></tr>
+  <tr><td><code>topColor</code>, <code>bottomColor</code></td><td>colors at those values (per bar allowed); <code>null</code> = transparent</td></tr>
+</table></div>
+
+<h3 id="plotshape">plotshape(condition, options)</h3>
+<p>Draws a marker on every bar where the boolean series is true. Shapes can also trigger <a href="#alerts">signal alerts</a>.</p>
+<pre><code class="js">plotshape(ta.crossover(fast, slow), { title: 'Long', location: 'belowbar', shape: 'triangleup', color: color.lime, text: 'L' })</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>Values</th></tr>
+  <tr><td><code>title</code></td><td>name in alerts and settings</td></tr>
+  <tr><td><code>location</code></td><td><code>abovebar</code> (default), <code>belowbar</code>, <code>top</code>, <code>bottom</code></td></tr>
+  <tr><td><code>shape</code> (alias <code>style</code>)</td><td><code>circle</code> (default), <code>triangleup</code>, <code>triangledown</code>, <code>arrowup</code>, <code>arrowdown</code>, <code>labelup</code>, <code>labeldown</code>, <code>square</code>, <code>diamond</code>, <code>cross</code>, <code>xcross</code>, <code>flag</code></td></tr>
+  <tr><td><code>color</code></td><td>color, array or <code>i =&gt; color</code></td></tr>
+  <tr><td><code>text</code></td><td>short label next to the marker</td></tr>
+</table></div>
+
+<h2 id="colors">Colors</h2>
+<p>Any CSS color string works: <code>'#2962ff'</code>, <code>'#2962ff80'</code>, <code>'rgba(41,98,255,0.5)'</code>. Pine helpers use <b>transparency</b> 0–100 (0 = opaque):</p>
+<div class="table-wrap"><table>
+  <tr><th>Function</th><th>Example</th></tr>
+  <tr><td><code>color.rgb(r, g, b, transp = 0)</code></td><td><code>color.rgb(33, 150, 243, 55)</code></td></tr>
+  <tr><td><code>color.new(color, transp)</code></td><td><code>color.new(color.red, 80)</code>, <code>color.new('#54b6d4', 60)</code></td></tr>
+</table></div>
+<div class="table-wrap"><table id="named-colors">
+  <tr><th>Name</th><th>Value</th><th>Name</th><th>Value</th><th>Name</th><th>Value</th></tr>
+</table></div>
+
+<h2 id="arith">Series helpers</h2>
+<div class="table-wrap"><table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>add(a, b)</code> <code>sub(a, b)</code> <code>mul(a, b)</code> <code>div(a, b)</code></td><td>element-wise arithmetic; arguments may be series or numbers; <code>null</code> in → <code>null</code> out; division by zero → <code>null</code></td></tr>
+  <tr><td><code>max(a, b)</code> <code>min(a, b)</code> <code>abs(a)</code></td><td>element-wise max / min / absolute value</td></tr>
+  <tr><td><code>shift(s, k = 1)</code></td><td>value <code>k</code> bars ago (Pine <code>s[k]</code>); the first <code>k</code> bars are <code>null</code></td></tr>
+  <tr><td><code>series(i =&gt; value)</code></td><td>build a series bar by bar (in order, oldest first)</td></tr>
+  <tr><td><code>nz(x, y = 0)</code></td><td>replace <code>null</code>/<code>NaN</code> by <code>y</code>; works on numbers and series</td></tr>
+  <tr><td><code>na(x)</code></td><td><code>true</code> if <code>x</code> is <code>null</code> or <code>NaN</code></td></tr>
+</table></div>
+
+<h2 id="ta">ta.* reference</h2>
+<p>All functions accept series (or numbers where it makes sense) and return series aligned with the bars. Results match TradingView's built-ins (Wilder smoothing for RSI/ATR/RMA).</p>
+<div class="table-wrap"><table>
+  <tr><th>Function</th><th>Returns</th><th>Description</th></tr>
+  <tr><td><code>ta.sma(s, len)</code></td><td>series</td><td>simple moving average</td></tr>
+  <tr><td><code>ta.ema(s, len)</code></td><td>series</td><td>exponential moving average</td></tr>
+  <tr><td><code>ta.wma(s, len)</code></td><td>series</td><td>weighted moving average</td></tr>
+  <tr><td><code>ta.rma(s, len)</code></td><td>series</td><td>Wilder's moving average (used by RSI, ATR)</td></tr>
+  <tr><td><code>ta.rsi(s, len)</code></td><td>series</td><td>relative strength index</td></tr>
+  <tr><td><code>ta.tr()</code></td><td>series</td><td>true range</td></tr>
+  <tr><td><code>ta.atr(len = 14)</code></td><td>series</td><td>average true range</td></tr>
+  <tr><td><code>ta.stdev(s, len)</code></td><td>series</td><td>standard deviation (population, like Pine)</td></tr>
+  <tr><td><code>ta.highest(s, len)</code>, <code>ta.lowest(s, len)</code></td><td>series</td><td>highest / lowest value of the last <code>len</code> bars</td></tr>
+  <tr><td><code>ta.change(s, k = 1)</code></td><td>series</td><td><code>s - s[k]</code></td></tr>
+  <tr><td><code>ta.mom(s, k = 10)</code></td><td>series</td><td>momentum (same as change)</td></tr>
+  <tr><td><code>ta.roc(s, k = 9)</code></td><td>series</td><td>rate of change in %</td></tr>
+  <tr><td><code>ta.cum(s)</code></td><td>series</td><td>cumulative sum</td></tr>
+  <tr><td><code>ta.linreg(s, len, offset = 0)</code></td><td>series</td><td>linear regression value</td></tr>
+  <tr><td><code>ta.mfi(s, len)</code></td><td>series</td><td>money flow index (Pine signature, <code>s</code> usually <code>hlc3</code>)</td></tr>
+  <tr><td><code>ta.stoch(s, high, low, len)</code></td><td>series</td><td>stochastic %K (raw); <code>ta.stoch(len)</code> uses close/high/low</td></tr>
+  <tr><td><code>ta.cci(s, len = 20)</code></td><td>series</td><td>commodity channel index</td></tr>
+  <tr><td><code>ta.crossover(a, b)</code></td><td>bool series</td><td><code>a</code> crosses above <code>b</code>; <code>b</code> may be a number</td></tr>
+  <tr><td><code>ta.crossunder(a, b)</code></td><td>bool series</td><td><code>a</code> crosses below <code>b</code></td></tr>
+  <tr><td><code>ta.cross(a, b)</code></td><td>bool series</td><td>either direction</td></tr>
+  <tr><td><code>ta.macd(s, 12, 26, 9)</code></td><td><code>{macd, signal, hist}</code></td><td>MACD lines</td></tr>
+  <tr><td><code>ta.bb(s, 20, 2)</code></td><td><code>{upper, basis, lower}</code></td><td>Bollinger Bands</td></tr>
+  <tr><td><code>ta.supertrend(mult = 3, period = 10)</code></td><td><code>{line, dir}</code></td><td>SuperTrend line and direction: <code>dir = 1</code> up trend, <code>-1</code> down trend (<b>opposite sign</b> to Pine's <code>ta.supertrend</code>)</td></tr>
+  <tr><td><code>ta.vwap()</code></td><td>series</td><td>VWAP anchored to the day (session)</td></tr>
+  <tr><td><code>ta.pivothigh(left = 5, right = 5)</code></td><td>series</td><td>pivot high price, reported <code>right</code> bars after the pivot (when it is confirmed, like Pine), else <code>null</code></td></tr>
+  <tr><td><code>ta.pivotlow(left = 5, right = 5)</code></td><td>series</td><td>pivot low price, reported <code>right</code> bars after the pivot, else <code>null</code></td></tr>
+  <tr><td><code>ta.valuewhen(cond, s, occurrence = 0)</code></td><td>series</td><td>value of <code>s</code> when <code>cond</code> was last true (0 = most recent)</td></tr>
+  <tr><td><code>ta.barssince(cond)</code></td><td>series</td><td>bars since <code>cond</code> was last true</td></tr>
+</table></div>
+
+<h2 id="security">Other timeframes: security()</h2>
+<pre><code class="js">// 4-hour 21 SMA on any chart timeframe
+const ma4h = security('4h', s =&gt; s.ta.sma(s.close, 21))
+// several values at once
+const d = security('D', s =&gt; s.close)</code></pre>
+<p><code>security(tf, s =&gt; expr)</code> evaluates <code>expr</code> on bars of another timeframe and maps the result back onto chart bars.
+<code>s</code> has the same API as the main script (<code>s.open … s.ohlc4</code>, <code>s.ta</code>, <code>s.series</code>, <code>s.shift</code>, helpers).</p>
+<ul>
+  <li>Timeframes: app ids (<code>'15m'</code>, <code>'4h'</code>, <code>'1D'</code>, <code>'1W'</code>) or Pine ids (<code>'15'</code>, <code>'240'</code>, <code>'D'</code>, <code>'W'</code>, <code>'M'</code>).</li>
+  <li><b>No lookahead</b> (Pine <code>barmerge.lookahead_off</code>): a higher-timeframe value appears on the chart once its bar has closed; until then the previous one is shown. This avoids repainting. Opt in with <code>security(tf, fn, { lookahead: true })</code>.</li>
+  <li>The data is loaded on demand (exchange first, older history from ClickHouse), so the first run on a new symbol can take a moment.</li>
+  <li>Indexing <code>x[i - 1]</code> on a security result refers to the previous <b>chart</b> bar, as in Pine.</li>
+</ul>
+
+<h2 id="math">math.*</h2>
+<p><code>math</code> contains every <code>Math</code> member (<code>math.abs</code>, <code>math.max</code>, <code>math.min</code>, <code>math.sqrt</code>, <code>math.log</code>,
+<code>math.pow</code>, <code>math.round</code>, <code>math.PI</code> …) plus:</p>
+<div class="table-wrap"><table>
+  <tr><th>Function</th><th>Description</th></tr>
+  <tr><td><code>math.avg(...values)</code></td><td>average; <code>null</code> if any value is <code>null</code></td></tr>
+  <tr><td><code>math.sum(...values)</code></td><td>sum</td></tr>
+</table></div>
+<p>These work on numbers. For series use the <a href="#arith">series helpers</a> or <code>series(i =&gt; math.max(a[i], b[i]))</code>.</p>
+
+<h2 id="alerts">Alerts on custom indicators</h2>
+<p>In the indicator's legend open <b>…</b> → <b>Add alert…</b>. You can alert on:</p>
+<ul>
+  <li>any <b>plot</b> compared with a value or with another plot (crossing, crossing up/down, greater/less than),</li>
+  <li>any <b>plotshape()</b> signal: the alert fires when the shape appears.</li>
+</ul>
+<p>Alerts are evaluated by the server with the same code and your saved input values, also while the browser is closed, and delivered via the channels you chose (in-app, Telegram, e-mail, webhook). Custom indicator alerts require a plan that includes them.</p>
+<div class="note">Alerts reference plots and shapes by their <code>title</code>. Renaming a plot after creating an alert breaks the alert — keep titles stable.</div>
+
+<h2 id="pine">Porting from Pine Script</h2>
+<div class="table-wrap"><table>
+  <tr><th>Pine</th><th>ChartScript</th></tr>
+  <tr><td><code>indicator("X", overlay=true)</code></td><td><code>indicator('X', { overlay: true })</code></td></tr>
+  <tr><td><code>len = input.int(14, "Length")</code></td><td><code>const len = input('Length', 14)</code> (title first)</td></tr>
+  <tr><td><code>src = input.source(close, "Source")</code></td><td><code>const src = input.source('Source', 'close')</code></td></tr>
+  <tr><td><code>a + b</code>, <code>a * 2</code></td><td><code>add(a, b)</code>, <code>mul(a, 2)</code> or <code>series(i =&gt; a[i] + b[i])</code></td></tr>
+  <tr><td><code>x[1]</code></td><td><code>shift(x, 1)</code>, or <code>x[i - 1]</code> inside a loop</td></tr>
+  <tr><td><code>var float v = 0</code> + <code>if</code> blocks</td><td><code>let v = 0; for (let i = 0; i &lt; n; i++) { … }</code></td></tr>
+  <tr><td><code>na</code>, <code>nz(x)</code>, <code>na(x)</code></td><td><code>null</code>, <code>nz(x)</code>, <code>na(x)</code></td></tr>
+  <tr><td><code>a &gt; b</code> (either may be na)</td><td><code>a != null &amp;&amp; b != null &amp;&amp; a &gt; b</code></td></tr>
+  <tr><td><code>cond ? x : y</code></td><td><code>series(i =&gt; cond[i] ? x[i] : y[i])</code></td></tr>
+  <tr><td><code>request.security(syminfo.tickerid, "240", expr)</code></td><td><code>security('240', s =&gt; expr)</code></td></tr>
+  <tr><td><code>plot(x, "T", color=c, linewidth=2)</code></td><td><code>plot(x, { title: 'T', color: c, width: 2 })</code></td></tr>
+  <tr><td><code>plot(x, style=plot.style_histogram)</code></td><td><code>plot(x, { style: 'histogram' })</code></td></tr>
+  <tr><td><code>color = x &gt; 0 ? color.green : color.red</code></td><td><code>color: i =&gt; x[i] &gt; 0 ? color.green : color.red</code></td></tr>
+  <tr><td><code>p1 = plot(a)</code> … <code>fill(p1, p2, color)</code></td><td><code>fill(a, b, { color })</code></td></tr>
+  <tr><td><code>fill(p1, p2, top, bottom, topCol, bottomCol)</code></td><td><code>fill(a, b, { topValue, bottomValue, topColor, bottomColor })</code></td></tr>
+  <tr><td><code>plotshape(c, style=shape.triangleup, location=location.belowbar)</code></td><td><code>plotshape(c, { shape: 'triangleup', location: 'belowbar' })</code></td></tr>
+  <tr><td><code>display=display.none</code></td><td>do not plot it; use the series directly</td></tr>
+</table></div>
+<h3>Worked example</h3>
+<div class="grid2">
+  <div><div class="label">Pine v5</div><pre><code>//@version=5
+indicator("Trend", overlay=true)
+len = input.int(50, "Length")
+ma = ta.ema(close, len)
+up = close &gt; ma and close[1] &lt;= ma[1]
+plot(ma, "EMA", color=close &gt; ma ? color.green : color.red, linewidth=2)
+plotshape(up, "Up", shape.triangleup, location.belowbar, color.lime)</code></pre></div>
+  <div><div class="label">ChartScript</div><pre><code class="js">indicator('Trend', { overlay: true })
+const len = input('Length', 50)
+const ma = ta.ema(close, len)
+const up = series(i =&gt; i &gt; 0 &amp;&amp; ma[i - 1] != null &amp;&amp;
+  close[i] &gt; ma[i] &amp;&amp; close[i - 1] &lt;= ma[i - 1])
+plot(ma, { title: 'EMA', width: 2, color: i =&gt; close[i] &gt; ma[i] ? color.green : color.red })
+plotshape(up, { title: 'Up', shape: 'triangleup', location: 'belowbar', color: color.lime })</code></pre></div>
+</div>
+<p>Complete ports of two larger Pine scripts are in the repository under <code>examples/</code>: <i>SqueezeWt</i> (squeeze momentum + WaveTrend) and <i>ALL SMAs – Dynamic Multi-TF Exit</i> (4H <code>security()</code>, stateful signals, gradient band).</p>
+
+<h2 id="examples">Examples</h2>
+<h3>RSI with zones and divergence-friendly fill</h3>
+<pre><code class="js">indicator('RSI zones', { overlay: false })
+const len = input('Length', 14)
+const ob = input('Overbought', 70)
+const os = input('Oversold', 30)
+const r = ta.rsi(close, len)
+
+plot(r, { title: 'RSI', color: '#7e57c2', width: 2 })
+hline(ob, { color: color.red, title: 'Overbought' })
+hline(os, { color: color.green, title: 'Oversold' })
+fill(ob, os, { color: color.new('#7e57c2', 90) })
+plotshape(ta.crossover(r, os), { title: 'Buy', location: 'bottom', shape: 'triangleup', color: color.lime })
+plotshape(ta.crossunder(r, ob), { title: 'Sell', location: 'top', shape: 'triangledown', color: color.red })</code></pre>
+
+<h3>Bollinger Bands with a squeeze highlight</h3>
+<pre><code class="js">indicator('BB squeeze', { overlay: true })
+const len = input('Length', 20)
+const mult = input('StdDev', 2)
+const bb = ta.bb(close, len, mult)
+const width = div(sub(bb.upper, bb.lower), bb.basis)
+const tight = series(i =&gt; width[i] != null &amp;&amp; width[i] &lt;= ta.lowest(width, 120)[i] * 1.1)
+
+plot(bb.upper, { title: 'Upper', color: '#2962ff' })
+plot(bb.basis, { title: 'Basis', color: '#ff6d00' })
+plot(bb.lower, { title: 'Lower', color: '#2962ff' })
+fill(bb.upper, bb.lower, { color: i =&gt; tight[i] ? color.new(color.yellow, 80) : color.new('#2962ff', 92) })</code></pre>
+<div class="note">Calling <code>ta.lowest(width, 120)</code> inside <code>series()</code> recomputes it for every bar. Compute it once outside the loop for speed:
+<code>const low120 = ta.lowest(width, 120)</code>, then use <code>low120[i]</code>.</div>
+
+<h3>Multi-timeframe trend filter</h3>
+<pre><code class="js">indicator('HTF trend', { overlay: true })
+const tf = input.select('Higher timeframe', '4h', ['1h', '4h', '1D', '1W'])
+const len = input('Length', 50)
+const htf = security(tf, s =&gt; s.ta.ema(s.close, len))
+const bull = series(i =&gt; htf[i] != null &amp;&amp; close[i] &gt; htf[i])
+
+plot(htf, { title: 'HTF EMA', width: 2, style: 'stepline', color: i =&gt; bull[i] ? color.teal : color.red })
+fill(close, htf, { color: i =&gt; bull[i] ? color.new(color.teal, 88) : color.new(color.red, 88) })</code></pre>
+
+<h3>Stateful trailing stop</h3>
+<pre><code class="js">indicator('ATR trailing stop', { overlay: true })
+const mult = input('ATR multiplier', 3)
+const atr = ta.atr(14)
+let stop = null, long = true
+const out = series(i =&gt; {
+  if (atr[i] == null) return null
+  const longStop = close[i] - mult * atr[i], shortStop = close[i] + mult * atr[i]
+  if (stop == null) stop = longStop
+  if (long) { stop = Math.max(stop, longStop); if (close[i] &lt; stop) { long = false; stop = shortStop } }
+  else { stop = Math.min(stop, shortStop); if (close[i] &gt; stop) { long = true; stop = longStop } }
+  return stop
+})
+plot(out, { title: 'Stop', style: 'circles', width: 2, color: i =&gt; close[i] &gt; out[i] ? color.lime : color.red })</code></pre>
+
+<h2 id="limits">Limits &amp; sandbox</h2>
+<div class="table-wrap"><table>
+  <tr><th>Limit</th><th>Value</th></tr>
+  <tr><td>Run time</td><td>3 s per run in the browser; 10 s per request on the server. Longer runs are stopped (endless loops included).</td></tr>
+  <tr><td>Network, DOM, cookies</td><td>not available — <code>fetch</code>, <code>XMLHttpRequest</code>, <code>document</code>, <code>localStorage</code> do not exist or are blocked</td></tr>
+  <tr><td>Data</td><td>only the bars passed to the script (chart bars and <code>security()</code> timeframes)</td></tr>
+  <tr><td>Number of scripts / indicators</td><td>depends on your plan (see the plan limits in the user menu)</td></tr>
+</table></div>
+<p>In the browser your code runs in a Web Worker inside a sandboxed iframe with a content security policy that blocks all network access. On the server it runs in a fresh JavaScript context in an unprivileged process without network access. Results are plain data; the code never touches the application.</p>
+
+<h2 id="errors">Troubleshooting</h2>
+<div class="table-wrap"><table>
+  <tr><th>Symptom</th><th>Cause / fix</th></tr>
+  <tr><td>Nothing drawn, no error</td><td>Did you call <code>plot()</code>? Values may all be <code>null</code> (length longer than the loaded history, or a missing <code>null</code> guard).</td></tr>
+  <tr><td>Line goes to zero at the start</td><td><code>nz()</code> or a <code>null</code> treated as 0 — return <code>null</code> while there is not enough data.</td></tr>
+  <tr><td><code>x is not defined</code></td><td>typo, or a Pine name without a ChartScript equivalent (e.g. <code>syminfo</code>, <code>strategy.*</code>).</td></tr>
+  <tr><td><code>Cannot read properties of undefined</code></td><td>indexing outside the array: check <code>i - k &gt;= 0</code> before <code>x[i - k]</code>.</td></tr>
+  <tr><td><code>Execution timed out</code></td><td>an endless loop, or heavy work inside <code>series()</code> (see the BB example note).</td></tr>
+  <tr><td>Signals differ from TradingView</td><td>check <code>x[1]</code> vs <code>x[i - 1]</code>, <code>na</code> comparisons, and that <code>security()</code> uses no lookahead (TradingView default).</td></tr>
+  <tr><td>Alert does not fire</td><td>plot/shape titles changed after the alert was created, or the plan does not include custom indicator alerts.</td></tr>
+</table></div>
+</main>
+</div>
+<script>
+  // Named color table (Pine v5 palette, same values as the runtime)
+  const NAMED = { aqua: '#00bcd4', black: '#363a45', blue: '#2962ff', fuchsia: '#e040fb', gray: '#787b86', green: '#4caf50', lime: '#00e676', maroon: '#880e4f', navy: '#311b92', olive: '#808000', orange: '#ff9800', purple: '#9c27b0', red: '#ff5252', silver: '#b2b5be', teal: '#00897b', white: '#ffffff', yellow: '#ffeb3b' };
+  const tbl = document.getElementById('named-colors');
+  const names = Object.keys(NAMED);
+  for (let r = 0; r < Math.ceil(names.length / 3); r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < 3; c++) {
+      const k = names[r * 3 + c];
+      const a = document.createElement('td'), b = document.createElement('td');
+      if (k) { a.innerHTML = `<code>color.${k}</code>`; b.innerHTML = `<span class="sw" style="background:${NAMED[k]}"></span>${NAMED[k]}`; }
+      tr.append(a, b);
+    }
+    tbl.append(tr);
+  }
+
+  // Minimal JavaScript highlighter for the examples
+  const KW = /\b(const|let|var|if|else|for|return|true|false|null|new|function)\b/;
+  for (const el of document.querySelectorAll('pre code')) {
+    const src = el.textContent;
+    const re = /(\/\/[^\n]*)|('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_]\w*\b)(?=\s*\()|(\b[A-Za-z_]\w*\b)/g;
+    const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let out = '', last = 0, m;
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      const t = esc(m[0]);
+      if (m[1]) out += `<span class="tk-c">${t}</span>`;
+      else if (m[2]) out += `<span class="tk-s">${t}</span>`;
+      else if (m[3]) out += `<span class="tk-n">${t}</span>`;
+      else if (m[4]) out += KW.test(m[4]) ? `<span class="tk-k">${t}</span>` : `<span class="tk-f">${t}</span>`;
+      else out += KW.test(m[5]) && m[5].match(KW)[0] === m[5] ? `<span class="tk-k">${t}</span>` : t;
+      last = re.lastIndex;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  }
+
+  // Section filter and active link
+  const links = [...document.querySelectorAll('#toc a')];
+  document.getElementById('filter').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    for (const a of links) a.classList.toggle('hidden', !!q && !a.textContent.toLowerCase().includes(q));
+  });
+  const heads = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const onScroll = () => {
+    let cur = heads[0];
+    for (const h of heads) if (h.getBoundingClientRect().top < 80) cur = h;
+    for (const a of links) a.classList.toggle('active', a.getAttribute('href') === '#' + cur.id);
+  };
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+</script>
+</body>
+</html>

@@ -110,6 +110,8 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .pane-ctrls { display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
 .chartwrap:hover .pane-ctrls { opacity: .85; }
 .lg-act:disabled { opacity: .35; cursor: default; }
+.scroll-recent { position: absolute; z-index: 6; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--bg3); border-radius: 4px; background: var(--bg2); color: var(--text); cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+.scroll-recent:hover { background: var(--bg3); }
 .scale-btns { position: absolute; z-index: 6; display: flex; gap: 3px; }
 .scale-btn { width: 20px; height: 20px; padding: 0; border: 1px solid var(--bg3); border-radius: 3px; background: var(--bg2); color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; }
 .scale-btn:hover { color: var(--text); }
@@ -222,7 +224,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 
 /* Script editor */
 .editor-modal { --w: 1200px; height: calc(100vh - 32px); }
-.editor-layout { display: grid; grid-template-columns: 200px 1fr 300px; gap: 0; height: 100%; min-height: 0; }
+.editor-layout { display: grid; grid-template-columns: 200px 1fr; gap: 0; height: 100%; min-height: 0; }
 .editor-side { border-right: 1px solid var(--border); overflow: auto; padding: 8px; }
 .editor-side .es-item { padding: 6px 8px; border-radius: 4px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-side .es-item:hover { background: var(--hover); }
@@ -234,10 +236,30 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .editor-cm .CodeMirror { position: absolute; inset: 0; height: auto; font-size: 13px; font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
 .editor-cm .cm-error-line { background: rgba(242,54,69,.18) !important; }
 .editor-out { border-top: 1px solid var(--border); padding: 8px; max-height: 140px; overflow: auto; flex-shrink: 0; }
-.editor-doc { border-left: 1px solid var(--border); overflow: auto; padding: 10px; font-size: 12px; }
-.editor-doc code { color: #82aaff; font-family: ui-monospace, monospace; font-size: 11.5px; word-break: break-word; }
-.editor-doc .doc-row { margin-bottom: 8px; }
-.editor-doc .doc-row div { color: var(--muted); }
+.editor-out { background: var(--bg2); }
+.modal-head .head-link { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; margin-right: 10px; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 400; color: var(--muted); text-decoration: none; }
+.modal-head .head-link:hover { background: var(--hover); color: var(--text); }
+.modal-head .head-link + .x { margin-left: 0; }
+/* CodeMirror theme in the app palette */
+.cm-s-chartscript.CodeMirror { background: var(--bg); color: var(--text); }
+.cm-s-chartscript .CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--border); }
+.cm-s-chartscript .CodeMirror-linenumber { color: #50535e; }
+.cm-s-chartscript .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.cm-s-chartscript div.CodeMirror-selected, .cm-s-chartscript.CodeMirror-focused div.CodeMirror-selected { background: rgba(41,98,255,.28); }
+.cm-s-chartscript .CodeMirror-line::selection, .cm-s-chartscript .CodeMirror-line > span::selection, .cm-s-chartscript .CodeMirror-line > span > span::selection { background: rgba(41,98,255,.28); }
+.cm-s-chartscript .CodeMirror-activeline-background { background: var(--bg2); }
+.cm-s-chartscript .CodeMirror-matchingbracket { color: var(--text) !important; outline: 1px solid #5d6474; }
+.cm-s-chartscript .cm-comment { color: #5d6474; font-style: italic; }
+.cm-s-chartscript .cm-keyword { color: #c792ea; }
+.cm-s-chartscript .cm-string, .cm-s-chartscript .cm-string-2 { color: #9ccc65; }
+.cm-s-chartscript .cm-number { color: #ff9800; }
+.cm-s-chartscript .cm-atom { color: #f77c80; }
+.cm-s-chartscript .cm-def { color: #e3e5ea; }
+.cm-s-chartscript .cm-variable { color: #d1d4dc; }
+.cm-s-chartscript .cm-variable-2, .cm-s-chartscript .cm-variable-3 { color: #b2b5be; }
+.cm-s-chartscript .cm-property { color: #5b9cf6; }
+.cm-s-chartscript .cm-operator { color: #89ddff; }
+.cm-s-chartscript .cm-punctuation, .cm-s-chartscript .cm-bracket { color: #9598a1; }
 .editor-modal .modal-body { padding: 0; overflow: hidden; }
 
 /* Datasource admin */
@@ -266,7 +288,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
   .tb-btn span { display: none; }
   .symbol-btn span { display: inline; }
   .editor-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .editor-side, .editor-doc { display: none; }
+  .editor-side { display: none; }
   .form-row > label:first-child { width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
 }

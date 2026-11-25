@@ -58,6 +58,23 @@ test('TC-CHART-05 log and auto scale toggles (A / L)', async ({ page }) => {
   expect(await page.evaluate(() => __app.chart.priceScale('right').options().autoScale)).toBe(false);
   await page.click('#sb-auto');
   expect(await page.evaluate(() => __app.chart.priceScale('right').options().autoScale)).toBe(true);
+  // both choices are saved per user
+  await page.click('#sb-log');
+  await page.click('#sb-auto');
+  await page.waitForTimeout(1200); // debounced layout save
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.mainSeries && __app.S.view.length > 50);
+  // auto off + log restored: the candles must still be on screen (the scale is fitted once, then manual)
+  await page.waitForFunction(() => __app.chart.priceScale('right').options().autoScale === false);
+  expect(await page.evaluate(() => __app.chart.priceScale('right').options())).toMatchObject({ mode: 1, autoScale: false });
+  expect(await page.evaluate(() => {
+    const b = __app.S.view[__app.S.view.length - 1];
+    const y = __app.mainSeries.priceToCoordinate(b.close), h = __app.chart.panes()[0].getHeight();
+    return y != null && y > 0 && y < h;
+  })).toBe(true);
+  await expect(page.locator('#sb-log')).toHaveClass(/active/);
+  await expect(page.locator('#sb-auto')).not.toHaveClass(/active/);
+  await resetLayout(page);
 });
 
 test('TC-CHART-06 scrolling back loads older bars from ClickHouse', async ({ page }) => {
@@ -118,4 +135,21 @@ test('TC-CHART-09 chart settings change candle colors, persist, and reset to def
   expect(await page.evaluate(() => __app.mainSeries.options().upColor)).toBe('#089981');
   await resetLayout(page);
   expect(errors).toEqual([]);
+});
+
+test('TC-CHART-10 "Scroll to the most recent bar" appears when scrolled back and returns to the last bar', async ({ page }) => {
+  const btn = page.locator('[data-testid=scroll-recent]');
+  await expect(btn).toBeHidden();
+  // scroll position is relative to the last bar, so loading older history meanwhile does not matter
+  const back = () => page.evaluate(() => __app.chart.timeScale().scrollToPosition(-200, false));
+  const atEnd = () => page.evaluate(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
+  await back();
+  await expect(btn).toBeVisible();
+  await btn.click();
+  await page.waitForFunction(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
+  await expect(btn).toBeHidden();
+  await back();
+  expect(await atEnd()).toBe(false);
+  await page.keyboard.press('Alt+Shift+ArrowRight');
+  await page.waitForFunction(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
 });

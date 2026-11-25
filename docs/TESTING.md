@@ -29,11 +29,14 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-CHART-02 | Timeframes | Toolbar buttons and full timeframe menu | Bar spacing matches the timeframe (15m = 900 s, 4h = 14400 s) |
 | TC-CHART-03 | Chart types | Switch through all 15 chart types | Each renders; Renko bricks have a constant size; no page errors |
 | TC-CHART-04 | Time zones | Open the list, pick UTC and Tokyo | > 60 zones; axis offset 0 and +9 h |
-| TC-CHART-05 | Scale | A (auto) and L (log) buttons | Price scale mode/auto toggle and buttons reflect it |
+| TC-CHART-05 | Scale | A (auto) and L (log) buttons, reload | Price scale mode/auto toggle, buttons reflect it, both are restored after reload |
 | TC-CHART-06 | History | Scroll to the first bar | Older bars loaded from ClickHouse |
 | TC-CHART-07 | History | Live-only symbol, scroll back | "No data on ClickHouse" warning |
 | TC-CHART-08 | Search | Type a symbol on the chart, Enter | Search opens, symbol switches |
 | TC-IND-06 | Legend | Hover an indicator legend row during live updates | Row is not re-created, buttons stay visible |
+| TC-IND-07 | Pane scale | A / L on an indicator pane; L on the price pane | Pane scale independent of the price pane, persisted |
+| TC-SCRIPT-06 | Editor docs | Docs button in the editor header | Reference opens in a new tab, editor keeps full width |
+| TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
 | TC-WL-02 | Watchlist | Click rows | Chart switches, active row highlighted |
@@ -44,7 +47,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-DRAW-04 | Cursors | Eraser, Measure, Zoom | Eraser deletes; measure is temporary; zoom narrows the range |
 | TC-IND-01 | Indicators | Add every built-in (admin, unlimited plan) | All compute non-empty plots, panes created, no errors |
 | TC-IND-02 | Indicators | Add RSI from picker, change length, hide, remove | Legend shows `RSI 21`, visibility toggles, pane removed |
-| TC-IND-03 | Indicators | Pane "move up" control | Pane order changes |
+| TC-IND-03 | Panes | Move up/down (also above the price pane), collapse, reload, expand, maximize/restore, delete | Order and collapse persist, price legend follows its pane |
 | TC-IND-04 | Indicators | Compare RSI with a reference Wilder RSI | Equal within 1e-6 |
 | TC-IND-05 | Plans | Exceed indicators-per-chart limit | Extra indicators refused with a plan message |
 | TC-SCRIPT-01 | ChartScript | New script from template, Run, Save & add | Run summary, indicator on chart with inputs in legend |

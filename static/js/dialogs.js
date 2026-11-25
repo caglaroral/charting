@@ -2,7 +2,7 @@
 import { api } from './api.js';
 import { el, $, modal, toast, confirmDialog, promptDialog, ICONS } from './ui.js';
 import { INDICATORS, defaultParams, defaultColors } from './indicators.js';
-import { TEMPLATE, API_DOC } from './script.js';
+import { TEMPLATE } from './script.js';
 import { TOOLS } from './drawings.js';
 
 export const confirm = confirmDialog;
@@ -161,11 +161,8 @@ export async function scriptEditor(app, scriptId = null) {
   const nameInput = el('input', { placeholder: 'Indicator name', 'data-testid': 'script-name' });
   const out = el('div', { class: 'editor-out' }, el('span', { class: 'muted' }, 'Use Run to test the code on the current chart. Ctrl+S saves, Ctrl+Enter runs.'));
   const cmBox = el('div', { class: 'editor-cm' });
-  const doc = el('div', { class: 'editor-doc' }, el('b', {}, 'ChartScript API'),
-    el('div', { class: 'help' }, 'JavaScript with Pine-like functions. Series are arrays: use shift(a, 1) for Pine a[1], and add(a, b) or series(i => a[i] + b[i]) for a + b.'),
-    API_DOC.map(([sig, d]) => el('div', { class: 'doc-row' }, el('code', {}, sig), d ? el('div', {}, d) : null)));
   const main = el('div', { class: 'editor-main' }, el('div', { class: 'ed-name' }, nameInput), cmBox, out);
-  const body = el('div', { class: 'editor-layout' }, side, main, doc);
+  const body = el('div', { class: 'editor-layout' }, side, main);
 
   const renderSide = () => {
     side.innerHTML = '';
@@ -230,7 +227,7 @@ export async function scriptEditor(app, scriptId = null) {
   };
 
   const m = modal({
-    title: 'Custom Indicator Editor (ChartScript)', cls: 'editor-modal', body,
+    title: 'Custom Indicator Editor', cls: 'editor-modal', body,
     footer: [
       el('button', { class: 'btn danger', 'data-testid': 'script-delete', onclick: async () => {
         if (!current?.id) return;
@@ -254,8 +251,13 @@ export async function scriptEditor(app, scriptId = null) {
       } }, 'Save & add to chart'),
     ],
   });
+  // Reference opens in its own tab so the editor keeps its full width
+  m.box.querySelector('.modal-head .x').before(el('a', {
+    class: 'head-link', href: '/docs/chartscript.html', target: '_blank', rel: 'noopener', title: 'ChartScript reference (new tab)', 'data-testid': 'script-docs',
+    html: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 4h10l4 4v12H5z M14 4v5h5 M8 13h8 M8 16h6" stroke="currentColor" stroke-width="1.6" fill="none"/></svg><span>Docs</span>',
+  }));
   cm = window.CodeMirror(cmBox, {
-    value: '', mode: 'javascript', theme: 'material-darker', lineNumbers: true, matchBrackets: true, autoCloseBrackets: true,
+    value: '', mode: 'javascript', theme: 'chartscript', lineNumbers: true, matchBrackets: true, autoCloseBrackets: true,
     indentUnit: 2, tabSize: 2, extraKeys: { 'Ctrl-S': () => save(), 'Cmd-S': () => save(), 'Ctrl-Enter': () => run(), 'Ctrl-/': 'toggleComment', 'Cmd-/': 'toggleComment' },
   });
   cm.on('change', () => { dirty = true; });

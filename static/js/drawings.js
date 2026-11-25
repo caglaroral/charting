@@ -1190,14 +1190,21 @@ export class DrawingManager {
   }
 
   // ------------------------------------------------------------------ interaction
+  // The price pane may sit below indicator panes: coordinates are relative to its top edge.
+  _mainPane() {
+    try { return this._series ? this._series.getPane() : this.h.chart.panes()[0]; } catch { return this.h.chart.panes()[0]; }
+  }
+
   _paneHeight() {
-    const panes = this.h.chart.panes();
-    return panes[0] ? panes[0].getHeight() : this.h.container.clientHeight;
+    const p = this._mainPane();
+    return p ? p.getHeight() : this.h.container.clientHeight;
   }
 
   _local(e) {
     const r = this.h.container.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    const pe = this._mainPane()?.getHTMLElement();
+    const top = pe ? pe.getBoundingClientRect().top - r.top : 0;
+    return [e.clientX - r.left, e.clientY - r.top - top];
   }
 
   _inPane(x, y) {

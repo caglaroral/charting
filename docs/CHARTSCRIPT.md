@@ -1,6 +1,8 @@
 # ChartScript — custom indicators
 
-ChartScript is plain JavaScript with a Pine-like API. Indicators are written in the in-browser editor
+ChartScript is plain JavaScript with a Pine-like API. The complete, detailed reference is a page of the
+app: [`/docs/chartscript.html`](../static/docs/chartscript.html) (opened with **Docs** in the editor's
+header). This file is a short summary. Indicators are written in the in-browser editor
 (**Editor** button), stored per user in ClickHouse and added to the chart like built-ins. The same
 runtime (`static/js/script.js`) runs in the browser sandbox for drawing and in the server sandbox for
 alerts, so an alert always sees the values you see on the chart.
@@ -44,7 +46,7 @@ plotshape(ta.crossover(r, 30), { title: 'Buy', location: 'bottom', color: color.
 | `ta.mfi(s, len)`, `ta.stoch(s, high, low, len)`, `ta.cci(s, len)` | Pine signatures |
 | `ta.change`, `ta.mom`, `ta.roc`, `ta.cum` | |
 | `ta.crossover/crossunder/cross(a, b)` | `b` may be a number |
-| `ta.macd`, `ta.bb`, `ta.supertrend`, `ta.vwap`, `ta.pivothigh/low`, `ta.valuewhen`, `ta.barssince` | |
+| `ta.macd`, `ta.bb`, `ta.supertrend`, `ta.vwap`, `ta.pivothigh/low`, `ta.valuewhen`, `ta.barssince` | `ta.supertrend` returns `dir = 1` for an up trend (opposite sign to Pine) |
 | `shift(s, k)` | Pine `s[k]` |
 | `add sub mul div max min abs` | vectorized arithmetic (arrays or numbers) |
 | `series(i => …)`, `nz(x, y)`, `na(x)` | |

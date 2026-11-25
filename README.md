@@ -7,7 +7,9 @@ store and Binance as the live feed.
 - **Charts**: 12 timeframes (1m … 1M), 15 chart types (candles, hollow, volume candles, bars, line,
   step line, area, HLC area, baseline, columns, high-low, Heikin Ashi, Renko, Line break …),
   ~90 time zones, log / percent / auto scale, panes for oscillators; chart settings for candle
-  body / border / wick colors, line color, background and grid (saved per user).
+  body / border / wick colors, line color, background and grid (saved per user); TradingView-style
+  pane controls (move up/down, also above the price pane, delete, collapse, maximize) with their own
+  auto / log scale; "scroll to the most recent bar" button (Alt+Shift+→).
 - **Data**: live bars from one exchange REST call per selection plus one multiplexed websocket;
   older history is loaded from ClickHouse on scroll ("No data on ClickHouse" when there is none).
 - **Drawing tools**: every TradingView tool family except AI and icons — trend lines, channels,
@@ -54,7 +56,7 @@ python3 server.py            # http://localhost:8080
 | Document | Contents |
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, ClickHouse schema, API |
-| [docs/CHARTSCRIPT.md](docs/CHARTSCRIPT.md) | Custom indicator language reference and Pine porting guide |
+| [docs/CHARTSCRIPT.md](docs/CHARTSCRIPT.md) | Custom indicator summary; the full reference is the in-app page [static/docs/chartscript.html](static/docs/chartscript.html) (**Docs** in the editor) |
 | [docs/ALERTS.md](docs/ALERTS.md) | Alert engine, conditions, notifications, exchange rate limits |
 | [docs/ADMIN.md](docs/ADMIN.md) | Data sources, users, subscription plans, notification servers |
 | [docs/SECURITY.md](docs/SECURITY.md) | Authentication, tenancy, sandboxing of user code, IAM migration |

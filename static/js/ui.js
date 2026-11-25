@@ -154,6 +154,8 @@ ICONS.braces = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M8 4c-2
 ICONS.up = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>';
 ICONS.down = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 5v14M6 13l6 6 6-6" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>';
 ICONS.maximize = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';
+ICONS.collapse = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 5l5 5 5-5M7 19l5-5 5 5" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';
+ICONS.expand = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 9l5-5 5 5M7 15l5 5 5-5" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';
 ICONS.restore = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';
 
 export const ic = (name) => el('span', { html: ICONS[name], style: { display: 'inline-flex' } });
