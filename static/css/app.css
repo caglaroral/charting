@@ -196,6 +196,10 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .form-row > input:not([type=checkbox]):not([type=color]), .form-row > select { flex: 1; min-width: 120px; }
 .form-grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; align-items: center; }
 .form-grid > label { color: var(--muted); }
+.form-section { grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid var(--border, #2a2e39); padding: 6px 0 4px; margin-top: 4px; }
+.cs-check { display: inline-flex; align-items: center; gap: 6px; color: var(--text, #d1d4dc); }
+.cs-colors { display: flex; gap: 8px; }
+.cs-colors input[type=color] { width: 36px; height: 26px; padding: 0; border: 1px solid #363a45; border-radius: 4px; background: none; cursor: pointer; }
 .help { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
 .err-box { background: rgba(242,54,69,.1); border: 1px solid rgba(242,54,69,.4); color: #ff8a93; border-radius: 4px; padding: 8px 10px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
 .ok-box { background: rgba(8,153,129,.1); border: 1px solid rgba(8,153,129,.4); color: #4fd1b5; border-radius: 4px; padding: 8px 10px; font-size: 12px; }

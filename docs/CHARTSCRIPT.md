@@ -34,6 +34,7 @@ plotshape(ta.crossover(r, 30), { title: 'Buy', location: 'bottom', color: color.
 | `hline(value, {color, title})` | horizontal level |
 | `plotshape(bools, {title, location, color, shape, text})` | location `abovebar`, `belowbar`, `top`, `bottom`; shape `triangleup/down`, `arrowup/down`, `circle`, `square`, `diamond` |
 | `fill(a, b, {color})` | shade between two series; per-bar color supported |
+| `fill(a, b, {topValue, bottomValue, topColor, bottomColor})` | vertical gradient between two series: `topColor` at `topValue`, `bottomColor` at `bottomValue` (`null` = transparent); colors may be per bar |
 | `security(tf, s => expr)` | evaluate on another timeframe (`'4h'`, `'240'`, `'D'` …). `s` exposes `open … ohlc4`, `ta`, helpers of that timeframe. No lookahead: a higher-timeframe value becomes visible when its bar closes (`barmerge.lookahead_off`). Pass `{lookahead: true}` as third argument to opt in. |
 | `open high low close volume time hl2 hlc3 ohlc4` | price series |
 | `n`, `bar_index`, `timeframe`, `timeframe_sec` | |
@@ -64,6 +65,8 @@ Plot keys (used by alerts) are derived from titles, so give plots and shapes a `
 | `request.security(sym, "240", expr)` | `security('240', s => expr)` |
 | `plot(x, style=plot.style_histogram, color=c)` | `plot(x, { style: 'histogram', color: c })` |
 | `fill(p1, p2, color)` | `fill(series1, series2, { color })` |
+| `fill(p1, p2, top_value, bottom_value, top_color, bottom_color)` | `fill(series1, series2, { topValue, bottomValue, topColor, bottomColor })` |
+| `plot(..., style=plot.style_area)` | `plot(x, { style: 'area' })` — filled to zero with one flat color |
 
 `examples/` contains complete ports of *SqueezeWt* and *ALL SMAs – Dynamic Multi-TF Exit*.
 

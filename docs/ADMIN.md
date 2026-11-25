@@ -30,6 +30,8 @@ python3 server.py adduser <name> [--admin]   # docker compose exec backend pytho
 python3 server.py passwd <name>
 python3 server.py users
 ```
+Deleting a user in the UI is a soft delete (the account stops resolving, data is kept). The API
+also offers a permanent purge of the user and all their rows: `DELETE /api/admin/users/{id}?purge=1`.
 
 ## Subscription plans
 

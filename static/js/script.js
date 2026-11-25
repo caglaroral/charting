@@ -28,6 +28,7 @@ export const API_DOC = [
   ['plot(series, {title, color, width, style})', 'style: line | histogram | circles | area | cross. color: a color, an array of colors or i => color'],
   ['hline(value, {color, title})', 'Horizontal level line'],
   ['fill(seriesA, seriesB, {color})', 'Shade the area between two series; color may be per bar. A null color is invisible (Pine na)'],
+  ['fill(a, b, {topValue, bottomValue, topColor, bottomColor})', 'Vertical gradient fill between two series (Pine gradient fill); colors may be per bar, null = transparent'],
   ['plotshape(boolSeries, {title, location, color, shape, text})', 'location: abovebar | belowbar | top | bottom; shape: triangleup | triangledown | arrowup | arrowdown | circle | square | diamond'],
   ['security(tf, s => ...)', 'Compute on another timeframe (e.g. "4h" or "240"). s exposes that timeframe\'s open/close/ta... No lookahead (lookahead_off)'],
   ['open high low close volume time hl2 hlc3 ohlc4', 'Price series (arrays)'],
@@ -174,10 +175,20 @@ export function runScript(code, bars, inputValues = {}, evaluator = defaultEvalu
       shape: String(o.shape || o.style || 'circle').toLowerCase(), text: o.text || '',
       data: main.toSeries(cond).map(Boolean),
     }),
-    // fill(a, b, {color}) shades the area between two series; color may be per bar (array / i => color)
-    fill: (a, b, o = {}) => out.fills.push({
-      a: main.toSeries(a), b: main.toSeries(b), color: baseColor(o.color, 'rgba(41,98,255,0.15)'), colors: colorsFor(o.color),
-    }),
+    // fill(a, b, {color}) shades the area between two series; color may be per bar (array / i => color).
+    // Gradient form (Pine fill(p1, p2, top_value, bottom_value, top_color, bottom_color)):
+    // fill(a, b, {topValue, bottomValue, topColor, bottomColor}); a null color end is transparent.
+    fill: (a, b, o = {}) => {
+      const grad = o.topValue != null || o.bottomValue != null;
+      out.fills.push(grad ? {
+        a: main.toSeries(a), b: main.toSeries(b), gradient: true,
+        top: main.toSeries(o.topValue ?? a), bottom: main.toSeries(o.bottomValue ?? b),
+        topColor: baseColor(o.topColor, NA_COLOR), topColors: colorsFor(o.topColor),
+        bottomColor: baseColor(o.bottomColor, NA_COLOR), bottomColors: colorsFor(o.bottomColor),
+      } : {
+        a: main.toSeries(a), b: main.toSeries(b), color: baseColor(o.color, 'rgba(41,98,255,0.15)'), colors: colorsFor(o.color),
+      });
+    },
     security,
     timeframe: env.tf || '', timeframe_sec: env.tfSec || 0,
     color: colorApi, math: mathApi,

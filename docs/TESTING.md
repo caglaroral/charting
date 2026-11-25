@@ -2,8 +2,9 @@
 
 End-to-end tests use [Playwright](https://playwright.dev) against a running instance
 (Docker or `python3 server.py`). They create two throw-away users (plans *pro* and *free*) through
-the admin API, run in a single worker (shared backend and exchange rate limit) and delete the users
-afterwards. Expected run time: ~4 minutes.
+the admin API, run in a single worker (shared backend and exchange rate limit) and **purge** the users
+afterwards (`DELETE /api/admin/users/{id}?purge=1`), so no layouts, drawings, alerts or scripts of test
+users stay in ClickHouse. Global setup also purges `e2e_*` users left by an interrupted run. Expected run time: ~4 minutes.
 
 ```bash
 cd tests/e2e
@@ -31,6 +32,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-CHART-06 | History | Scroll to the first bar | Older bars loaded from ClickHouse |
 | TC-CHART-07 | History | Live-only symbol, scroll back | "No data on ClickHouse" warning |
 | TC-CHART-08 | Search | Type a symbol on the chart, Enter | Search opens, symbol switches |
+| TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
 | TC-WL-02 | Watchlist | Click rows | Chart switches, active row highlighted |
 | TC-WL-03 | Watchlist | New list, delete list | List created empty, deleted after confirmation |
@@ -47,7 +49,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-SCRIPT-02 | ChartScript | Reference error on line 3 | Error box with message and `line 3` |
 | TC-SCRIPT-03 | Sandbox | Infinite loop; probe `document`/`parent`; `fetch` | Timeout without freezing the page; no DOM access; network blocked |
 | TC-SCRIPT-04 | Pine port | SqueezeWt | Own pane, 13 plots, 2 signals, legend identical to TradingView |
-| TC-SCRIPT-05 | Pine port | ALL SMAs (4H `security()`, `fill()`) | Overlay, 4H MA populated, fill present |
+| TC-SCRIPT-05 | Pine port | ALL SMAs (4H `security()`, `fill()`) | Overlay, 4H MA populated, gradient fill present |
 | TC-ALERT-01 | Alerts | Price alert from toolbar, toggle, delete | Listed, alert line on chart, paused, deleted |
 | TC-ALERT-02 | Alerts | Alert on a horizontal line | Drawing alert stored, bell marker on the drawing |
 | TC-ALERT-03 | Alert engine | RSI greater than 0 | Server engine evaluates the indicator and fires; in-app toast |

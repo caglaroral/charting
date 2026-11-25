@@ -11,6 +11,9 @@ export default async function globalSetup(config) {
   const ctx = await request.newContext({ baseURL });
   const login = await ctx.post('/api/auth/login', { data: admin });
   if (!login.ok()) throw new Error('Admin login failed: ' + (await login.text()));
+  // Remove users left behind by an interrupted earlier run
+  const existing = (await (await ctx.get('/api/admin/users')).json()).users || [];
+  for (const u of existing) if (/^e2e_(pro|free)_/.test(u.username)) await ctx.delete(`/api/admin/users/${u.id}?purge=1`);
   const run = Date.now().toString(36);
   const users = {};
   for (const plan of ['pro', 'free']) {

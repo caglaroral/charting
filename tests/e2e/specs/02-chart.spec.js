@@ -91,3 +91,31 @@ test.afterAll(async ({ browser }) => {
   await resetLayout(p);
   await p.close();
 });
+
+test('TC-CHART-09 chart settings change candle colors, persist, and reset to defaults', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.click('[data-testid="chart-settings"]');
+  await page.locator('[data-testid="cs-upColor"]').fill('#00bcd4');
+  await page.locator('[data-testid="cs-downColor"]').fill('#e040fb');
+  await page.locator('[data-testid="cs-wickVisible"]').uncheck();
+  await page.waitForFunction(() => __app.mainSeries.options().upColor === '#00bcd4' && __app.mainSeries.options().wickVisible === false);
+  await page.click('[data-testid="cs-save"]');
+  await page.waitForTimeout(1200); // layout save is debounced
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.mainSeries && __app.S.view.length > 50);
+  const o = await page.evaluate(() => __app.mainSeries.options());
+  expect(o.upColor).toBe('#00bcd4');
+  expect(o.downColor).toBe('#e040fb');
+  expect(o.wickVisible).toBe(false);
+  // Cancel discards a change, Defaults restores the TradingView colors
+  await page.click('[data-testid="chart-settings"]');
+  await page.locator('[data-testid="cs-upColor"]').fill('#ffffff');
+  await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => __app.mainSeries.options().upColor)).toBe('#00bcd4');
+  await page.click('[data-testid="chart-settings"]');
+  await page.click('[data-testid="cs-defaults"]');
+  await page.click('[data-testid="cs-save"]');
+  expect(await page.evaluate(() => __app.mainSeries.options().upColor)).toBe('#089981');
+  await resetLayout(page);
+  expect(errors).toEqual([]);
+});

@@ -235,7 +235,11 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "DELETE" and len(parts) > 2:
                     if parts[2] == uid:
                         raise HttpError(400, "You cannot delete yourself")
-                    auth.delete_user(parts[2])
+                    # ?purge=1 removes the user and all their data for good (used by the e2e suite)
+                    if q.get("purge") in ("1", "true"):
+                        auth.purge_user(parts[2])
+                    else:
+                        auth.delete_user(parts[2])
                     return self._json({"ok": True})
                 if method == "POST" and len(parts) > 2:
                     b = self._body()

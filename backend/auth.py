@@ -146,6 +146,19 @@ def set_password(user_id: str, password: str) -> None:
     ch.insert(f"{DB}.users", [r])
 
 
+USER_TABLES = ("sessions", "watchlists", "drawings", "settings", "alerts", "alert_events", "scripts")
+
+
+def purge_user(user_id: str) -> None:
+    """Permanently delete a user (also an already soft-deleted one) and every row they own."""
+    if not ch.query(f"SELECT id FROM {DB}.users FINAL WHERE id = {{id:String}}", {"id": user_id}):
+        raise AuthError("User not found")
+    for t in USER_TABLES:
+        ch.execute(f"DELETE FROM {DB}.{t} WHERE user_id = {{id:String}}", {"id": user_id})
+    ch.execute(f"DELETE FROM {DB}.users WHERE id = {{id:String}}", {"id": user_id})
+    _cache.data.clear()
+
+
 def upsert_external(provider: str, external_id: str, username: str, email: str = "") -> User:
     """Map an external identity (proxy header, IAM/OIDC subject) to an internal user, creating it if needed."""
     row = _find_user_row(provider, external_id=external_id)

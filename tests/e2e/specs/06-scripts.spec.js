@@ -81,11 +81,14 @@ test('TC-SCRIPT-05 ALL SMAs port uses 4H security() data and fill()', async ({ p
   const info = await page.evaluate(() => {
     const it = __app.ind.items.find(i => i.res.name?.startsWith('ALL SMAs'));
     const p = (t) => it.res.plots.find(x => x.title === t).data;
-    return { err: it.res.error, overlay: it.res.overlay, fills: it.res.fills.length, ma4h: p('4h 21 MA').filter(v => v != null).length, n: __app.S.view.length };
+    const f = it.res.fills[0];
+    return { err: it.res.error, overlay: it.res.overlay, fills: it.res.fills.length, gradient: !!f?.gradient, fade: f?.bottomColor, ma4h: p('4h 21 MA').filter(v => v != null).length, n: __app.S.view.length };
   });
   expect(info.err).toBeUndefined();
   expect(info.overlay).toBe(true);
   expect(info.fills).toBe(1);
+  expect(info.gradient).toBe(true); // Pine gradient fill: colored at the band, transparent at the MA
+  expect(info.fade).toBe('rgba(0,0,0,0)');
   expect(info.ma4h).toBeGreaterThan(info.n * 0.5);
   await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
 });

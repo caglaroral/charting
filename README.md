@@ -6,7 +6,8 @@ store and Binance as the live feed.
 
 - **Charts**: 12 timeframes (1m … 1M), 15 chart types (candles, hollow, volume candles, bars, line,
   step line, area, HLC area, baseline, columns, high-low, Heikin Ashi, Renko, Line break …),
-  ~90 time zones, log / percent / auto scale, panes for oscillators.
+  ~90 time zones, log / percent / auto scale, panes for oscillators; chart settings for candle
+  body / border / wick colors, line color, background and grid (saved per user).
 - **Data**: live bars from one exchange REST call per selection plus one multiplexed websocket;
   older history is loaded from ClickHouse on scroll ("No data on ClickHouse" when there is none).
 - **Drawing tools**: every TradingView tool family except AI and icons — trend lines, channels,

@@ -125,4 +125,8 @@ plot(band1, { title: 'Band', color: i => (i % 2 === 0 ? color.new('#d1d4dc', 50)
 const sbandLine = series(i => (trendChanged[i] ? null : Sband[i]))
 plot(sbandLine, { title: 'Dynamic Band', color: color.gray })
 const hl2ma = ta.sma(hl2, 20) // p2 is display.none in the original
-fill(sbandLine, hl2ma, { color: i => color.new(trend[i] ? '#54b6d4' : '#dd326b', 60) })
+// Pine: fill(p1, p2, band, ta.sma(hl2, 20), color.new(trend_color, 60), na) -> vertical gradient
+fill(sbandLine, hl2ma, {
+  topValue: bandS, bottomValue: hl2ma,
+  topColor: i => color.new(trend[i] ? '#54b6d4' : '#dd326b', 60), bottomColor: null,
+})

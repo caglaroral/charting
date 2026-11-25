@@ -78,6 +78,14 @@ export function fmtTime(t, withTime = true) {
   return withTime ? `${s} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` : s;
 }
 
+// Main series / canvas appearance (Chart settings dialog); stored per user in the layout
+export const DEFAULT_STYLE = {
+  upColor: '#089981', downColor: '#f23645', body: true,
+  borderVisible: true, borderUpColor: '#089981', borderDownColor: '#f23645',
+  wickVisible: true, wickUpColor: '#089981', wickDownColor: '#f23645',
+  lineColor: '#2962ff', background: '#131722', gridVisible: true, gridColor: '#1e222d',
+};
+
 // ======================================================================= app object
 export const app = {
   S: {
@@ -85,7 +93,7 @@ export const app = {
     indicators: [], tz: 'Europe/Istanbul', tzOffset: 10800, magnet: false, keepDrawing: false,
     favTfs: ['1m', '5m', '15m', '1h', '4h', '1D'], watchlists: [], wlId: null, alerts: [], scripts: [],
     bars: [], view: [], exhausted: false, priceDecimals: 2, scaleMode: 0, autoScale: true, rightPanel: true,
-    availableTfs: Object.keys(TF_SEC),
+    availableTfs: Object.keys(TF_SEC), style: { ...DEFAULT_STYLE },
   },
   chart: null, mainSeries: null, dm: null, sandbox: null,
   ind: { sig: null, items: [], token: 0 },
@@ -94,6 +102,7 @@ export const app = {
   on(evt, fn) { this.hooks[evt].push(fn); },
   emit(evt, ...a) { for (const f of this.hooks[evt]) { try { f(...a); } catch (e) { console.error(e); } } },
 };
+app.DEFAULT_STYLE = DEFAULT_STYLE;
 window.__app = app; // handy for debugging and e2e tests
 app.liveConnections = () => connectionCount();
 window.__tools = TOOLS;
@@ -168,6 +177,7 @@ async function start() {
     rightPanel: L.rightPanel !== false,
     scaleMode: L.scaleMode || 0,
     lastTool: L.lastTool || {},
+    style: { ...DEFAULT_STYLE, ...(L.style && typeof L.style === 'object' ? L.style : {}) },
   });
   S.cursorMode = L.cursorMode || 'cross';
   S.tzOffset = tzOffsetSec(S.tz);
@@ -192,6 +202,7 @@ app.saveLayout = debounce(() => {
   api.setSetting('layout', {
     symbol: S.symbol, tf: S.tf, chartType: S.chartType, indicators: S.indicators.map(i => ({ id: i.id, type: i.type, script_id: i.script_id, params: i.params, colors: i.colors, visible: i.visible })),
     tz: S.tz, magnet: S.magnet, keepDrawing: S.keepDrawing, lastTool: S.lastTool, cursorMode: app.dm?.cursorMode, favTfs: S.favTfs, wlId: S.wlId, rightPanel: S.rightPanel, scaleMode: S.scaleMode,
+    style: S.style,
   }).catch(e => console.warn('layout save failed', e));
 }, 800);
 
@@ -213,6 +224,7 @@ function createChart() {
     timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 7 },
     localization: { timeFormatter: (t) => fmtTime(t, TF_SEC[S.tf] < 86400), priceFormatter: (p) => app.fmtPrice(p) },
   });
+  applyCanvasStyle();
   app.dm = new DrawingManager({
     chart: app.chart, container,
     getBars: () => S.view || S.bars, tfSec: () => TF_SEC[S.tf], tz: () => S.tzOffset, symbol: () => S.symbol,
@@ -244,31 +256,55 @@ function createChart() {
   }, 0));
 }
 
+function applyCanvasStyle() {
+  const st = S.style;
+  const grid = st.gridVisible ? st.gridColor : 'rgba(0,0,0,0)';
+  app.chart.applyOptions({ layout: { background: { type: 'solid', color: st.background } }, grid: { vertLines: { color: grid }, horzLines: { color: grid } } });
+  $('#chart').style.background = st.background;
+  const lg = $('#legend'); // OHLC values follow the candle colors, like TradingView
+  if (lg) { lg.style.setProperty('--up', st.upColor); lg.style.setProperty('--down', st.downColor); }
+}
+
+/** Apply S.style to the chart (called live by the Chart settings dialog). */
+app.applyStyle = () => {
+  applyCanvasStyle();
+  if (!app.mainSeries || !S.view.length) return;
+  makeMainSeries(); setMainData(); app.ind.sig = null;
+  refreshIndicators(true); app.dm.update();
+};
+
+const alpha = (hex, a) => (/^#[0-9a-f]{6}$/i.test(hex) ? hex + a : hex);
+
 function makeMainSeries() {
   const c = app.chart;
   if (app.mainSeries) { c.removeSeries(app.mainSeries); app.mainSeries = null; }
   for (const x of app.extraMain || []) c.removeSeries(x);
   app.extraMain = [];
-  const up = '#089981', down = '#f23645';
+  const st = S.style, up = st.upColor, down = st.downColor, line = st.lineColor;
+  const candle = {
+    upColor: st.body ? up : 'rgba(0,0,0,0)', downColor: st.body ? down : 'rgba(0,0,0,0)',
+    borderVisible: st.borderVisible, borderUpColor: st.borderUpColor, borderDownColor: st.borderDownColor,
+    wickVisible: st.wickVisible, wickUpColor: st.wickUpColor, wickDownColor: st.wickDownColor,
+  };
   const t = S.chartType;
   let s;
-  if (t === 'volcandles') s = c.addSeries(LWC.CandlestickSeries, { upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false });
+  if (t === 'volcandles') s = c.addSeries(LWC.CandlestickSeries, candle);
   else if (t === 'highlow') s = c.addSeries(LWC.CandlestickSeries, { upColor: '#2962ff', downColor: '#2962ff', borderVisible: false, wickVisible: false });
-  else if (t === 'columns') s = c.addSeries(LWC.HistogramSeries, { color: '#08998199', base: 0 });
-  else if (t === 'linemarkers') s = c.addSeries(LWC.LineSeries, { color: '#2962ff', lineWidth: 2, pointMarkersVisible: true, pointMarkersRadius: 2.5 });
-  else if (t === 'stepline') s = c.addSeries(LWC.LineSeries, { color: '#2962ff', lineWidth: 2, lineType: 1 });
+  else if (t === 'columns') s = c.addSeries(LWC.HistogramSeries, { color: alpha(up, '99'), base: 0 });
+  else if (t === 'linemarkers') s = c.addSeries(LWC.LineSeries, { color: line, lineWidth: 2, pointMarkersVisible: true, pointMarkersRadius: 2.5 });
+  else if (t === 'stepline') s = c.addSeries(LWC.LineSeries, { color: line, lineWidth: 2, lineType: 1 });
   else if (t === 'hlcarea') {
     app.extraMain = [
-      c.addSeries(LWC.AreaSeries, { lineColor: 'rgba(8,153,129,.7)', topColor: 'rgba(8,153,129,.25)', bottomColor: 'rgba(8,153,129,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
-      c.addSeries(LWC.AreaSeries, { lineColor: 'rgba(242,54,69,.7)', topColor: 'rgba(242,54,69,0)', bottomColor: 'rgba(242,54,69,.25)', invertFilledArea: true, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+      c.addSeries(LWC.AreaSeries, { lineColor: alpha(up, 'b3'), topColor: alpha(up, '40'), bottomColor: alpha(up, '00'), lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
+      c.addSeries(LWC.AreaSeries, { lineColor: alpha(down, 'b3'), topColor: alpha(down, '00'), bottomColor: alpha(down, '40'), invertFilledArea: true, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }),
     ];
     s = c.addSeries(LWC.LineSeries, { color: '#d1d4dc', lineWidth: 2 });
-  } else if (t === 'candles' || t === 'heikin' || t === 'renko' || t === 'linebreak') s = c.addSeries(LWC.CandlestickSeries, { upColor: up, downColor: down, wickUpColor: up, wickDownColor: down, borderVisible: false });
-  else if (t === 'hollow') s = c.addSeries(LWC.CandlestickSeries, { upColor: 'rgba(0,0,0,0)', downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down });
+  } else if (t === 'candles' || t === 'heikin' || t === 'renko' || t === 'linebreak') s = c.addSeries(LWC.CandlestickSeries, candle);
+  else if (t === 'hollow') s = c.addSeries(LWC.CandlestickSeries, { ...candle, upColor: 'rgba(0,0,0,0)', borderVisible: true, borderUpColor: up, borderDownColor: down });
   else if (t === 'bars') s = c.addSeries(LWC.BarSeries, { upColor: up, downColor: down, thinBars: false });
-  else if (t === 'line') s = c.addSeries(LWC.LineSeries, { color: '#2962ff', lineWidth: 2 });
-  else if (t === 'area') s = c.addSeries(LWC.AreaSeries, { lineColor: '#2962ff', topColor: 'rgba(41,98,255,.35)', bottomColor: 'rgba(41,98,255,0)', lineWidth: 2 });
-  else s = c.addSeries(LWC.BaselineSeries, { baseValue: { type: 'price', price: 0 }, topLineColor: up, bottomLineColor: down, topFillColor1: 'rgba(8,153,129,.25)', bottomFillColor2: 'rgba(242,54,69,.25)' });
+  else if (t === 'line') s = c.addSeries(LWC.LineSeries, { color: line, lineWidth: 2 });
+  else if (t === 'area') s = c.addSeries(LWC.AreaSeries, { lineColor: line, topColor: alpha(line, '59'), bottomColor: alpha(line, '00'), lineWidth: 2 });
+  else s = c.addSeries(LWC.BaselineSeries, { baseValue: { type: 'price', price: 0 }, topLineColor: up, bottomLineColor: down, topFillColor1: alpha(up, '40'), topFillColor2: alpha(up, '0d'), bottomFillColor1: alpha(down, '0d'), bottomFillColor2: alpha(down, '40') });
   app.mainSeries = s;
   app.dm.attach(s);
   applyPriceFormat();
@@ -278,7 +314,7 @@ function makeMainSeries() {
 function mainData() {
   const b = S.view, t = S.chartType;
   if (['line', 'linemarkers', 'stepline', 'area', 'baseline', 'hlcarea'].includes(t)) return b.map(x => ({ time: x.time, value: x.close }));
-  if (t === 'columns') return b.map((x, i) => ({ time: x.time, value: x.close, color: i && x.close < b[i - 1].close ? '#f2364599' : '#08998199' }));
+  if (t === 'columns') return b.map((x, i) => ({ time: x.time, value: x.close, color: i && x.close < b[i - 1].close ? alpha(S.style.downColor, '99') : alpha(S.style.upColor, '99') }));
   if (t === 'highlow') return b.map(x => ({ time: x.time, open: x.high, high: x.high, low: x.low, close: x.low }));
   if (t === 'volcandles') {
     const avg = [];
@@ -710,7 +746,9 @@ function seriesData(plot) {
   return plot.data.map((v, i) => {
     if (v == null) return { time: b[i].time };
     const c = plot.colors && plot.colors[i];
-    return c ? { time: b[i].time, value: v, color: c } : { time: b[i].time, value: v };
+    if (!c) return { time: b[i].time, value: v };
+    if (plot.style === 'area') return { time: b[i].time, value: v, topLineColor: c, bottomLineColor: c, topFillColor1: c, topFillColor2: c, bottomFillColor1: c, bottomFillColor2: c };
+    return { time: b[i].time, value: v, color: c };
   });
 }
 
@@ -728,7 +766,9 @@ function markersFor(res) {
   return out;
 }
 
-// Draws ChartScript fill() areas between two series, bar by bar, below the indicator lines.
+// Draws ChartScript fill() areas between two series below the indicator lines.
+// Columns are snapped to whole device pixels so neighbouring bars never overlap (no seams);
+// runs of one solid color are drawn as a single polygon, gradient fills column by column.
 function fillPrimitive(it, series) {
   let req = null;
   const prim = {
@@ -737,28 +777,55 @@ function fillPrimitive(it, series) {
     paneViews: () => views,
     update: () => req && req(),
   };
+  const NA = 'rgba(0,0,0,0)';
   const views = [{
     zOrder: () => 'bottom',
     renderer: () => ({
-      draw: (target) => target.useMediaCoordinateSpace(({ context: ctx }) => {
+      draw: (target) => target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
         const fills = it.res.fills || [];
         if (!fills.length) return;
         const ts = app.chart.timeScale();
-        const vr = ts.getVisibleLogicalRange();
-        if (!vr) return;
-        const i0 = Math.max(1, Math.floor(vr.from) - 1), i1 = Math.min(S.view.length - 1, Math.ceil(vr.to) + 1);
+        const range = ts.getVisibleLogicalRange();
+        if (!range) return;
+        const i0 = Math.max(1, Math.floor(range.from) - 1), i1 = Math.min(S.view.length - 1, Math.ceil(range.to) + 1);
+        const X = (i) => { const x = ts.logicalToCoordinate(i); return x == null ? null : Math.round(x * hr); };
+        const Y = (v) => { const y = series.priceToCoordinate(v); return y == null ? null : y * vr; };
         for (const f of fills) {
+          let run = null; // solid fill: [{x, ya, yb}], color
+          const flush = () => {
+            if (run && run.pts.length > 1) {
+              ctx.fillStyle = run.color;
+              ctx.beginPath();
+              run.pts.forEach((p, k) => (k ? ctx.lineTo(p.x, p.ya) : ctx.moveTo(p.x, p.ya)));
+              for (let k = run.pts.length - 1; k >= 0; k--) ctx.lineTo(run.pts[k].x, run.pts[k].yb);
+              ctx.closePath(); ctx.fill();
+            }
+            run = null;
+          };
           for (let i = i0; i <= i1; i++) {
             const a0 = f.a[i - 1], a1 = f.a[i], b0 = f.b[i - 1], b1 = f.b[i];
-            if (a0 == null || a1 == null || b0 == null || b1 == null) continue;
-            const c = f.colors ? f.colors[i] : f.color;
-            if (!c || c === 'rgba(0,0,0,0)') continue;
-            const x0 = ts.logicalToCoordinate(i - 1), x1 = ts.logicalToCoordinate(i);
-            const ya0 = series.priceToCoordinate(a0), ya1 = series.priceToCoordinate(a1), yb0 = series.priceToCoordinate(b0), yb1 = series.priceToCoordinate(b1);
-            if ([x0, x1, ya0, ya1, yb0, yb1].some(v => v == null)) continue;
-            ctx.fillStyle = c;
-            ctx.beginPath(); ctx.moveTo(x0, ya0); ctx.lineTo(x1, ya1); ctx.lineTo(x1, yb1); ctx.lineTo(x0, yb0); ctx.closePath(); ctx.fill();
+            const x0 = X(i - 1), x1 = X(i);
+            const ok = a0 != null && a1 != null && b0 != null && b1 != null && x0 != null && x1 != null;
+            const ya0 = ok && Y(a0), ya1 = ok && Y(a1), yb0 = ok && Y(b0), yb1 = ok && Y(b1);
+            if (!ok || [ya0, ya1, yb0, yb1].some(v => v == null || v === false)) { flush(); continue; }
+            if (f.gradient) {
+              const tc = (f.topColors ? f.topColors[i] : f.topColor) || NA, bc = (f.bottomColors ? f.bottomColors[i] : f.bottomColor) || NA;
+              if (tc === NA && bc === NA) continue;
+              const yt = f.top[i] != null ? Y(f.top[i]) : null, yb = f.bottom[i] != null ? Y(f.bottom[i]) : null;
+              if (yt == null || yb == null) continue;
+              let g;
+              if (Math.abs(yb - yt) < 0.5) g = tc;
+              else { g = ctx.createLinearGradient(0, yt, 0, yb); g.addColorStop(0, tc); g.addColorStop(1, bc); }
+              ctx.fillStyle = g;
+              ctx.beginPath(); ctx.moveTo(x0, ya0); ctx.lineTo(x1, ya1); ctx.lineTo(x1, yb1); ctx.lineTo(x0, yb0); ctx.closePath(); ctx.fill();
+              continue;
+            }
+            const c = (f.colors ? f.colors[i] : f.color) || NA;
+            if (c === NA) { flush(); continue; }
+            if (!run || run.color !== c) { flush(); run = { color: c, pts: [{ x: x0, ya: ya0, yb: yb0 }] }; }
+            run.pts.push({ x: x1, ya: ya1, yb: yb1 });
           }
+          flush();
         }
       }),
     }),
@@ -795,7 +862,8 @@ function rebuildIndicatorSeries(items) {
       if (res.volume) common.priceFormat = { type: 'volume' };
       let s;
       if (p.style === 'histogram' || p.style === 'columns') s = c.addSeries(LWC.HistogramSeries, { ...common, color: p.color, base: 0 }, pane);
-      else if (p.style === 'area') s = c.addSeries(LWC.AreaSeries, { ...common, lineColor: p.color, topColor: p.color, bottomColor: 'rgba(0,0,0,0)', lineWidth: p.width }, pane);
+      // Pine area plots fill to zero with one flat color (histbase 0), not to the pane bottom
+      else if (p.style === 'area') s = c.addSeries(LWC.BaselineSeries, { ...common, baseValue: { type: 'price', price: 0 }, topLineColor: p.color, bottomLineColor: p.color, topFillColor1: p.color, topFillColor2: p.color, bottomFillColor1: p.color, bottomFillColor2: p.color, lineWidth: p.width }, pane);
       else if (p.style === 'circles' || p.style === 'cross' || p.style === 'dots') s = c.addSeries(LWC.LineSeries, { ...common, color: p.color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: Math.max(1.5, p.width), lastValueVisible: false }, pane);
       else s = c.addSeries(LWC.LineSeries, { ...common, color: p.color, lineWidth: Math.min(4, p.width), lineType: p.style === 'stepline' ? 1 : 0 }, pane);
       s.setData(seriesData(p));
@@ -1050,6 +1118,7 @@ function buildTopbar() {
   $('#btn-undo').onclick = () => app.dm.undo();
   $('#btn-redo').onclick = () => app.dm.redo();
   $('#btn-screenshot').onclick = screenshot;
+  $('#btn-chart-settings').onclick = () => dialogs.chartSettings(app);
   $('#btn-fullscreen').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
   $('#btn-togglepanel').onclick = () => {
     S.rightPanel = !S.rightPanel;
@@ -1093,7 +1162,7 @@ function screenshot() {
   const out = document.createElement('canvas');
   out.width = canvas.width; out.height = canvas.height + 28;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#131722'; ctx.fillRect(0, 0, out.width, out.height);
+  ctx.fillStyle = S.style.background; ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(canvas, 0, 28);
   ctx.fillStyle = '#d1d4dc'; ctx.font = '600 14px sans-serif';
   ctx.fillText(`${app.symbolName(S.symbol)} · ${TF_NAME[S.tf]} · ${new Date().toLocaleString('en-GB')}`, 10, 19);

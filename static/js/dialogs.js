@@ -648,6 +648,45 @@ export async function notifyAdmin() {
   });
 }
 
+/** Chart settings: candle body / border / wick colors, line color, background, grid. Live preview. */
+export function chartSettings(app) {
+  const S = app.S;
+  const before = { ...S.style };
+  const st = S.style;
+  let frame = 0;
+  const preview = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => app.applyStyle()); };
+  const color = (k, testid) => el('input', { type: 'color', value: st[k], 'data-testid': testid || `cs-${k}`, oninput: (e) => { st[k] = e.target.value; preview(); } });
+  const check = (k) => el('input', { type: 'checkbox', checked: !!st[k], 'data-testid': `cs-${k}`, onchange: (e) => { st[k] = e.target.checked; preview(); } });
+  const row = (label, k, ...colors) => [el('label', {}, k ? el('span', { class: 'cs-check' }, check(k), ' ', label) : label), el('div', { class: 'cs-colors' }, colors)];
+  const body = el('div', { class: 'form-grid cs-grid' },
+    el('div', { class: 'form-section' }, 'Symbol'),
+    ...row('Body', 'body', color('upColor'), color('downColor')),
+    ...row('Borders', 'borderVisible', color('borderUpColor'), color('borderDownColor')),
+    ...row('Wick', 'wickVisible', color('wickUpColor'), color('wickDownColor')),
+    ...row('Line / area', null, color('lineColor')),
+    el('div', { class: 'form-section' }, 'Canvas'),
+    ...row('Background', null, color('background')),
+    ...row('Grid lines', 'gridVisible', color('gridColor')),
+  );
+  const m = modal({
+    title: 'Chart settings', width: '420px', body,
+    onClose: () => { if (!saved) { Object.assign(S.style, before); app.applyStyle(); } },
+    footer: [
+      el('button', { class: 'btn ghost', 'data-testid': 'cs-defaults', onclick: () => {
+        Object.assign(S.style, app.DEFAULT_STYLE);
+        for (const inp of body.querySelectorAll('input')) {
+          const k = inp.dataset.testid.slice(3);
+          if (inp.type === 'checkbox') inp.checked = !!S.style[k]; else inp.value = S.style[k];
+        }
+        app.applyStyle();
+      } }, 'Defaults'),
+      el('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn primary', 'data-testid': 'cs-save', onclick: () => { saved = true; app.saveLayout(); m.close(); } }, 'Save'),
+    ],
+  });
+  let saved = false;
+}
+
 export function changePassword() {
   const o = el('input', { type: 'password', autocomplete: 'current-password' }), n = el('input', { type: 'password', autocomplete: 'new-password' });
   const m = modal({
