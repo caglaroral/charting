@@ -1,12 +1,12 @@
 // TC-IND: built-in indicators: add, settings, legend actions, panes
 import { test, expect } from '@playwright/test';
-import { login, admin, trackErrors, resetLayout } from '../helpers.js';
+import { login, user, trackErrors, resetLayout } from '../helpers.js';
 
 test.beforeEach(async ({ page }) => { await login(page); await resetLayout(page); await page.reload(); await page.waitForFunction(() => window.__app && __app.S.view.length > 50); });
 
 test('TC-IND-01 every built-in indicator computes and renders', async ({ page }) => {
-  // the unlimited plan is needed to stack every indicator on one chart
-  await login(page, admin());
+  // the unlimited plan is needed to stack every indicator on one chart (dedicated user, not the admin)
+  await login(page, user('unlimited'));
   await resetLayout(page);
   await page.reload();
   await page.waitForFunction(() => window.__app && __app.S.view.length > 50);
@@ -77,4 +77,17 @@ test('TC-IND-04 RSI values match a reference calculation', async ({ page }) => {
     return { got: it.res.plots[0].data[c.length - 1], want: 100 - 100 / (1 + au / ad) };
   });
   expect(Math.abs(got - want)).toBeLessThan(1e-6);
+});
+
+test('TC-IND-06 legend buttons stay visible while hovering during live updates', async ({ page }) => {
+  await page.evaluate(() => __app.addIndicator('rsi'));
+  const row = page.locator('.pane-legend .lg-ind').first();
+  await row.hover();
+  await expect(row.locator('[data-testid=ind-settings]')).toBeVisible();
+  const before = await row.elementHandle();
+  await page.evaluate(() => __app.refreshIndicators()); // what every live tick does
+  await page.waitForTimeout(2500); // let real websocket ticks arrive as well
+  expect(await before.evaluate(e => e.isConnected)).toBe(true); // the legend row was not re-created
+  await expect(row.locator('[data-testid=ind-settings]')).toBeVisible();
+  await resetLayout(page);
 });

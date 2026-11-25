@@ -11,20 +11,19 @@ export default async function globalSetup(config) {
   const ctx = await request.newContext({ baseURL });
   const login = await ctx.post('/api/auth/login', { data: admin });
   if (!login.ok()) throw new Error('Admin login failed: ' + (await login.text()));
-  // Some tests need the admin's unlimited plan; keep the admin's own workspace and restore it in teardown
-  const adminLayout = (await (await ctx.get('/api/settings/layout')).json()).value ?? null;
   // Remove users left behind by an interrupted earlier run
   const existing = (await (await ctx.get('/api/admin/users')).json()).users || [];
-  for (const u of existing) if (/^e2e_(pro|free)_/.test(u.username)) await ctx.delete(`/api/admin/users/${u.id}?purge=1`);
+  for (const u of existing) if (/^e2e_(pro|free|max)_/.test(u.username)) await ctx.delete(`/api/admin/users/${u.id}?purge=1`);
   const run = Date.now().toString(36);
   const users = {};
-  for (const plan of ['pro', 'free']) {
-    const u = { username: `e2e_${plan}_${run}`, password: `pw_${run}_${Math.random().toString(36).slice(2, 8)}`, plan };
+  // 'unlimited' (max) is for tests that stack many indicators, so they never touch the admin's workspace
+  for (const plan of ['pro', 'free', 'unlimited']) {
+    const u = { username: `e2e_${plan === 'unlimited' ? 'max' : plan}_${run}`, password: `pw_${run}_${Math.random().toString(36).slice(2, 8)}`, plan };
     const r = await ctx.post('/api/admin/users', { data: u });
     if (!r.ok()) throw new Error('Could not create test user: ' + (await r.text()));
     u.id = (await r.json()).user.id;
     users[plan] = u;
   }
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ admin, users, adminLayout }, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ admin, users }, null, 2));
   await ctx.dispose();
 }

@@ -508,7 +508,8 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     setStatus('err', e.message);
     showMsg('Failed to load data: ' + e.message);
   }
-  if (!initial || true) app.saveLayout();
+  // Opening the app only restores the saved layout; saving it again could overwrite changes made in another tab
+  if (!initial) app.saveLayout();
   app.emit('symbolChanged', symbol, info);
 }
 app.setSymbol = setSymbol;
@@ -733,10 +734,14 @@ export async function refreshIndicators(force = false) {
   if (token !== app.ind.token) return;
   const items = insts.map((inst, i) => ({ inst, res: results[i] }));
   const sig = sigOf(items);
-  if (force || sig !== app.ind.sig) rebuildIndicatorSeries(items);
+  const rebuild = force || sig !== app.ind.sig;
+  if (rebuild) rebuildIndicatorSeries(items);
   else updateIndicatorData(items);
   app.ind.sig = sig;
-  renderLegend();
+  // Rebuild the legend DOM only when its content changes: re-creating it on every live tick
+  // dropped the hover state, so the legend buttons vanished under a resting mouse pointer.
+  const lkey = legendKey();
+  if (rebuild || lkey !== app.ind.legendKey) renderLegend();
   updateLegendValues(null);
 }
 app.refreshIndicators = refreshIndicators;
@@ -956,6 +961,7 @@ function moveIndicatorPane(inst, dir) {
 function toggleMaximize(it) {
   app.maxPane = app.maxPane === it.inst.id ? null : it.inst.id;
   applyPaneStretch();
+  renderLegend();
 }
 
 function applyPaneStretch() {
@@ -969,7 +975,13 @@ function applyPaneStretch() {
   requestAnimationFrame(positionPaneLegends);
 }
 
+function legendKey() {
+  return JSON.stringify([S.symbol, S.tf, S.dataSource, app.maxPane, app.ind.items.map(({ inst, res }) =>
+    [inst.id, inst.visible, res.name, res.error, paramsText(inst, res), inst.script_id])]);
+}
+
 function renderLegend() {
+  app.ind.legendKey = legendKey();
   const main = $('#legend');
   main.innerHTML = '';
   $('#pane-legends').innerHTML = '';

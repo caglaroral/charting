@@ -1,10 +1,11 @@
 # Testing
 
 End-to-end tests use [Playwright](https://playwright.dev) against a running instance
-(Docker or `python3 server.py`). They create two throw-away users (plans *pro* and *free*) through
+(Docker or `python3 server.py`). They create three throw-away users (plans *pro*, *free* and *unlimited*) through
 the admin API, run in a single worker (shared backend and exchange rate limit) and **purge** the users
 afterwards (`DELETE /api/admin/users/{id}?purge=1`), so no layouts, drawings, alerts or scripts of test
-users stay in ClickHouse. Global setup also purges `e2e_*` users left by an interrupted run. Expected run time: ~4 minutes.
+users stay in ClickHouse. Global setup also purges `e2e_*` users left by an interrupted run.
+The admin account is only used to manage users and open admin dialogs; no test changes its workspace. Expected run time: ~4 minutes.
 
 ```bash
 cd tests/e2e
@@ -32,6 +33,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-CHART-06 | History | Scroll to the first bar | Older bars loaded from ClickHouse |
 | TC-CHART-07 | History | Live-only symbol, scroll back | "No data on ClickHouse" warning |
 | TC-CHART-08 | Search | Type a symbol on the chart, Enter | Search opens, symbol switches |
+| TC-IND-06 | Legend | Hover an indicator legend row during live updates | Row is not re-created, buttons stay visible |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
 | TC-WL-02 | Watchlist | Click rows | Chart switches, active row highlighted |
