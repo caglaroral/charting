@@ -144,3 +144,21 @@ test('TC-IND-07 indicator panes have their own auto / log scale buttons, indepen
   await expect(page.locator('.pane-scale-btns[data-pane="1"] [data-testid=pane-log]')).toHaveClass(/active/);
   await resetLayout(page);
 });
+
+test('TC-IND-08 indicators stay aligned with the bars when older history is loaded', async ({ page }) => {
+  const id = await page.evaluate(() => __app.addIndicator('sma').id);
+  await page.waitForFunction(() => __app.ind.items.some(i => i.inst.type === 'sma' && i.res.plots));
+  const lastVal = () => page.evaluate(() => { const it = __app.ind.items.find(i => i.inst.type === 'sma'); const d = it.res.plots[0].data; return +d[d.length - 1].toFixed(4); });
+  const legend = () => page.locator(`.lg-ind[data-ind="${id}"] .lg-vals`).innerText();
+  await page.mouse.move(5, 5); // keep the crosshair off the chart: the legend then shows the last bar
+  await page.waitForTimeout(200);
+  const v0 = await lastVal(), l0 = await legend(), n0 = await page.evaluate(() => __app.S.view.length);
+  // scroll to the start: older bars are prepended from ClickHouse
+  await page.evaluate(() => __app.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 100 }));
+  await page.waitForFunction((n) => __app.S.view.length > n, n0, { timeout: 30_000 });
+  await page.evaluate(() => __app.chart.timeScale().scrollToPosition(12, false));
+  await page.waitForFunction(() => __app.ind.items.every(i => i.res.t0 === __app.S.view[0].time));
+  expect(await lastVal()).toBeCloseTo(v0, 2);      // same value for the same (last) bar
+  await page.waitForTimeout(300);
+  expect(await legend()).toBe(l0);                 // legend reads the right bar
+});

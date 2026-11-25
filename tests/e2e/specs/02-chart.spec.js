@@ -148,8 +148,7 @@ test('TC-CHART-10 "Scroll to the most recent bar" appears when scrolled back and
   await btn.click();
   await page.waitForFunction(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
   await expect(btn).toBeHidden();
-  await back();
-  expect(await atEnd()).toBe(false);
+  await expect.poll(async () => { await back(); return atEnd(); }, { timeout: 5000 }).toBe(false);
   await page.keyboard.press('Alt+Shift+ArrowRight');
   await page.waitForFunction(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
 });

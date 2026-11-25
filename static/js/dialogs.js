@@ -50,7 +50,10 @@ export function symbolSearch(app, { initial = '', title = 'Symbol search', multi
   });
   const m = modal({ title, width: '560px', body: el('div', {}, input, list) });
   render();
-  setTimeout(() => { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }, 0);
+  // focus right away: keys typed before a deferred focus went to the page and were lost ("ETH" -> "EH")
+  const caretEnd = () => { input.focus(); input.setSelectionRange(input.value.length, input.value.length); };
+  caretEnd();
+  setTimeout(() => { if (document.activeElement !== input) caretEnd(); }, 0);
 }
 
 export function editFavTfs(app, done) {

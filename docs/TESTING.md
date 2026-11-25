@@ -37,6 +37,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-IND-07 | Pane scale | A / L on an indicator pane; L on the price pane | Pane scale independent of the price pane, persisted |
 | TC-SCRIPT-06 | Editor docs | Docs button in the editor header | Reference opens in a new tab, editor keeps full width |
 | TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
+| TC-IND-08 | History | Load older bars with an indicator on the chart | Results stay aligned with their bars, legend unchanged |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
 | TC-WL-02 | Watchlist | Click rows | Chart switches, active row highlighted |

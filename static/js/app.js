@@ -242,7 +242,11 @@ function createChart() {
   });
   makeMainSeries();
   if (S.cursorMode && S.cursorMode !== 'cross') app.dm.setTool(S.cursorMode);
-  app.chart.subscribeCrosshairMove((p) => { lastCrosshair = p && p.logical != null ? Math.round(p.logical) : null; updateLegendValues(lastCrosshair); });
+  let lgFrame = 0;
+  app.chart.subscribeCrosshairMove((p) => {
+    lastCrosshair = p && p.logical != null ? Math.round(p.logical) : null;
+    if (!lgFrame) lgFrame = requestAnimationFrame(() => { lgFrame = 0; updateLegendValues(lastCrosshair); });
+  });
   app.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
     if (r && r.from < 30) loadMore();
   });
@@ -260,6 +264,7 @@ function createChart() {
   app.chart.timeScale().subscribeVisibleLogicalRangeChange(updateScrollRecent); // buttons exist only now: show the restored A / L state
   // Dragging the price axis turns auto scale off in the library; mirror that state in the buttons.
   container.addEventListener('pointerup', () => setTimeout(() => {
+    positionPaneLegends(); // pane separators may have been dragged
     const auto = app.chart.priceScale('right', mainIdx()).options().autoScale;
     if (auto !== S.autoScale) { S.autoScale = auto; applyScaleMode(); app.saveLayout(); }
     for (const it of app.ind.items) {
@@ -324,6 +329,7 @@ function makeMainSeries() {
   else if (t === 'line') s = c.addSeries(LWC.LineSeries, { color: line, lineWidth: 2 });
   else if (t === 'area') s = c.addSeries(LWC.AreaSeries, { lineColor: line, topColor: alpha(line, '59'), bottomColor: alpha(line, '00'), lineWidth: 2 });
   else s = c.addSeries(LWC.BaselineSeries, { baseValue: { type: 'price', price: 0 }, topLineColor: up, bottomLineColor: down, topFillColor1: alpha(up, '40'), topFillColor2: alpha(up, '0d'), bottomFillColor1: alpha(down, '0d'), bottomFillColor2: alpha(down, '40') });
+  if ('crosshairMarkerVisible' in s.options()) s.applyOptions({ crosshairMarkerVisible: false }); // line/area types
   app.mainSeries = s;
   app.dm.attach(s);
   applyPriceFormat();
@@ -447,14 +453,17 @@ function fitPriceScaleOnce() {
   requestAnimationFrame(() => requestAnimationFrame(() => { if (!S.autoScale) ps.applyOptions({ autoScale: false }); }));
 }
 
-app.scrollToRecent = () => app.chart.timeScale().scrollToRealTime();
+// Jump (no animation: the animated scrollToRealTime could stop short when data updates meanwhile)
+app.scrollToRecent = () => { const ts = app.chart.timeScale(); ts.scrollToPosition(ts.options().rightOffset, false); };
 
 function updateScrollRecent() {
   const b = $('#btn-scroll-recent');
   if (!b) return;
   const r = app.chart.timeScale().getVisibleLogicalRange();
-  b.hidden = !r || !S.view.length || r.to >= S.view.length - 1;
-  if (!b.hidden) positionScaleBtns();
+  const hide = !r || !S.view.length || r.to >= S.view.length - 1;
+  if (hide === b.hidden) return;
+  b.hidden = hide;
+  if (!hide) positionScaleBtns(); // measures the layout: only when it appears
 }
 
 function positionScaleBtns() {
@@ -581,6 +590,7 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     applyPriceFormat();
     setMainData();
     fitPriceScaleOnce();
+    requestAnimationFrame(positionPaneLegends); // price scale width depends on the new prices
     app.dm.setDrawings(dr.drawings);
     showMsg(S.bars.length ? '' : 'No data for this symbol/timeframe');
     const n = S.view.length;
@@ -636,7 +646,6 @@ async function loadMore() {
     setMainData();
     const added = S.view.length - before;
     if (r) ts.setVisibleLogicalRange({ from: r.from + added, to: r.to + added });
-    app.htfCache.clear();
     await refreshIndicators();
     app.dm.update();
   } catch (e) {
@@ -790,22 +799,44 @@ export async function runCustom(code, params = {}) {
 }
 app.runCustom = runCustom;
 
+// Higher-timeframe bars for security(), cached per symbol/timeframe and extended incrementally:
+// older history comes from ClickHouse only, the exchange is asked only for newly closed HTF bars.
 async function getHtfBars(tf) {
-  const key = `${S.symbol}|${tf}|${S.bars[0]?.time}`;
-  if (app.htfCache.has(key)) return app.htfCache.get(key);
+  const key = `${S.symbol}|${tf}`;
   const sec = TF_SEC[tf];
   const firstUtc = S.bars[0].time - S.tzOffset, lastUtc = S.bars[S.bars.length - 1].time - S.tzOffset;
-  const need = Math.min(5000, Math.ceil((lastUtc - firstUtc) / sec) + 400);
   const provider = liveProvider(S.symbol);
-  let rows = [];
-  if (provider) rows = await restKlines(provider, app.symbolName(S.symbol), tf, { limit: Math.min(1500, need) });
-  if (!rows.length || rows[0][0] > firstUtc - 300 * sec) {
-    const older = await api.bars(S.symbol, tf, rows.length ? rows[0][0] : lastUtc + sec * 2, need).then(r => r.bars).catch(() => []);
-    rows = older.concat(rows);
+  let e = app.htfCache.get(key);
+  if (!e) {
+    const need = Math.min(5000, Math.ceil((lastUtc - firstUtc) / sec) + 400);
+    let rows = [];
+    if (provider) rows = await restKlines(provider, app.symbolName(S.symbol), tf, { limit: Math.min(1500, need) });
+    if (!rows.length || rows[0][0] > firstUtc - 300 * sec) {
+      const older = await api.bars(S.symbol, tf, rows.length ? rows[0][0] : lastUtc + sec * 2, need).then(r => r.bars).catch(() => []);
+      rows = older.filter(r => !rows.length || r[0] < rows[0][0]).concat(rows);
+    }
+    e = { rows, exhausted: false };
+    app.htfCache.set(key, e);
+  } else {
+    let changed = false;
+    // history scrolled back: prepend older HTF bars (warm-up of 300 bars for long MAs)
+    if (!e.exhausted && e.rows.length && e.rows[0][0] > firstUtc - 300 * sec) {
+      const need = Math.min(5000, Math.ceil((e.rows[0][0] - firstUtc) / sec) + 400);
+      const older = await api.bars(S.symbol, tf, e.rows[0][0], need).then(r => r.bars).catch(() => []);
+      const add = older.filter(r => r[0] < e.rows[0][0]);
+      if (!add.length) e.exhausted = true;
+      else { e.rows = add.concat(e.rows); changed = true; }
+    }
+    // a new HTF bar has opened since the last fetch: refresh the tail (one small request per HTF bar)
+    const lastRow = e.rows[e.rows.length - 1];
+    if (provider && lastRow && lastUtc >= lastRow[0] + sec) {
+      const tail = await restKlines(provider, app.symbolName(S.symbol), tf, { limit: 3 }).catch(() => []);
+      if (tail.length) { e.rows = e.rows.filter(r => r[0] < tail[0][0]).concat(tail); changed = true; }
+    }
+    if (!changed && e.bars) return e.bars;
   }
-  const bars = makeHtfBars(rows);
-  app.htfCache.set(key, bars);
-  return bars;
+  e.bars = makeHtfBars(e.rows);
+  return e.bars;
 }
 
 function sigOf(items) {
@@ -815,10 +846,14 @@ function sigOf(items) {
 export async function refreshIndicators(force = false) {
   const token = ++app.ind.token;
   const insts = S.indicators;
+  const t0 = S.view[0]?.time;
   const results = await Promise.all(insts.map(async inst => {
     try { return await computeIndicator(inst); } catch (e) { console.error(e); return { error: e.message, name: inst.type }; }
   }));
   if (token !== app.ind.token) return;
+  // Older history was prepended while computing: these arrays no longer line up with the bars.
+  if (S.view[0]?.time !== t0) return refreshIndicators(force);
+  for (const r of results) r.t0 = t0;
   const items = insts.map((inst, i) => ({ inst, res: results[i] }));
   const sig = sigOf(items);
   // re-creating the price series (chart type, style, symbol load) puts its pane back on top
@@ -834,15 +869,45 @@ export async function refreshIndicators(force = false) {
 }
 app.refreshIndicators = refreshIndicators;
 
+/**
+ * Index offset between S.view and an indicator result: results are computed on the bars of that
+ * moment; when older history is prepended afterwards, view index i maps to result index i - off.
+ */
+function resOff(res) {
+  const t0 = res && res.t0, v = S.view;
+  if (t0 == null || !v.length || v[0].time === t0) return 0;
+  let lo = 0, hi = v.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (v[m].time < t0) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+function point(plot, i) {
+  const t = S.view[i].time, v = plot.data[i];
+  if (v == null) return { time: t };
+  const c = plot.colors && plot.colors[i];
+  if (!c) return { time: t, value: v };
+  if (plot.style === 'area') return { time: t, value: v, topLineColor: c, bottomLineColor: c, topFillColor1: c, topFillColor2: c, bottomFillColor1: c, bottomFillColor2: c };
+  return { time: t, value: v, color: c };
+}
+
+// Push a plot to its series: only the changed last bar on live ticks (cheap), everything otherwise.
+function syncSeries(s, prev, p) {
+  const n = p.data.length;
+  if (!prev || prev.data.length !== n || prev.style !== p.style || n > S.view.length) { s.setData(seriesData(p)); return; }
+  let k = n;
+  for (let i = 0; i < n; i++) {
+    if (prev.data[i] !== p.data[i] || (p.colors && (!prev.colors || prev.colors[i] !== p.colors[i]))) { k = i; break; }
+  }
+  if (k === n) return;
+  if (k === n - 1) s.update(point(p, n - 1));
+  else s.setData(seriesData(p));
+}
+
 function seriesData(plot) {
-  const b = S.view;
-  return plot.data.map((v, i) => {
-    if (v == null) return { time: b[i].time };
-    const c = plot.colors && plot.colors[i];
-    if (!c) return { time: b[i].time, value: v };
-    if (plot.style === 'area') return { time: b[i].time, value: v, topLineColor: c, bottomLineColor: c, topFillColor1: c, topFillColor2: c, bottomFillColor1: c, bottomFillColor2: c };
-    return { time: b[i].time, value: v, color: c };
-  });
+  const n = Math.min(plot.data.length, S.view.length);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = point(plot, i);
+  return out;
 }
 
 const SHAPE_MAP = { triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', circle: 'circle', square: 'square', diamond: 'square', cross: 'square', xcross: 'square', flag: 'square' };
@@ -880,7 +945,8 @@ function fillPrimitive(it, series) {
         const ts = app.chart.timeScale();
         const range = ts.getVisibleLogicalRange();
         if (!range) return;
-        const i0 = Math.max(1, Math.floor(range.from) - 1), i1 = Math.min(S.view.length - 1, Math.ceil(range.to) + 1);
+        const off = resOff(it.res); // view index i -> result index i - off
+        const i0 = Math.max(1 + off, Math.floor(range.from) - 1), i1 = Math.min(S.view.length - 1, Math.ceil(range.to) + 1);
         const X = (i) => { const x = ts.logicalToCoordinate(i); return x == null ? null : Math.round(x * hr); };
         const Y = (v) => { const y = series.priceToCoordinate(v); return y == null ? null : y * vr; };
         for (const f of fills) {
@@ -896,15 +962,16 @@ function fillPrimitive(it, series) {
             run = null;
           };
           for (let i = i0; i <= i1; i++) {
-            const a0 = f.a[i - 1], a1 = f.a[i], b0 = f.b[i - 1], b1 = f.b[i];
+            const j = i - off;
+            const a0 = f.a[j - 1], a1 = f.a[j], b0 = f.b[j - 1], b1 = f.b[j];
             const x0 = X(i - 1), x1 = X(i);
             const ok = a0 != null && a1 != null && b0 != null && b1 != null && x0 != null && x1 != null;
             const ya0 = ok && Y(a0), ya1 = ok && Y(a1), yb0 = ok && Y(b0), yb1 = ok && Y(b1);
             if (!ok || [ya0, ya1, yb0, yb1].some(v => v == null || v === false)) { flush(); continue; }
             if (f.gradient) {
-              const tc = (f.topColors ? f.topColors[i] : f.topColor) || NA, bc = (f.bottomColors ? f.bottomColors[i] : f.bottomColor) || NA;
+              const tc = (f.topColors ? f.topColors[j] : f.topColor) || NA, bc = (f.bottomColors ? f.bottomColors[j] : f.bottomColor) || NA;
               if (tc === NA && bc === NA) continue;
-              const yt = f.top[i] != null ? Y(f.top[i]) : null, yb = f.bottom[i] != null ? Y(f.bottom[i]) : null;
+              const yt = f.top[j] != null ? Y(f.top[j]) : null, yb = f.bottom[j] != null ? Y(f.bottom[j]) : null;
               if (yt == null || yb == null) continue;
               let g;
               if (Math.abs(yb - yt) < 0.5) g = tc;
@@ -913,7 +980,7 @@ function fillPrimitive(it, series) {
               ctx.beginPath(); ctx.moveTo(x0, ya0); ctx.lineTo(x1, ya1); ctx.lineTo(x1, yb1); ctx.lineTo(x0, yb0); ctx.closePath(); ctx.fill();
               continue;
             }
-            const c = (f.colors ? f.colors[i] : f.color) || NA;
+            const c = (f.colors ? f.colors[j] : f.color) || NA;
             if (c === NA) { flush(); continue; }
             if (!run || run.color !== c) { flush(); run = { color: c, pts: [{ x: x0, ya: ya0, yb: yb0 }] }; }
             run.pts.push({ x: x1, ya: ya1, yb: yb1 });
@@ -951,7 +1018,7 @@ function rebuildIndicatorSeries(items) {
     it.own = pane > 0;
     const scaleId = res.volume ? `vol_${inst.id}` : 'right';
     for (const p of res.plots) {
-      const common = { priceScaleId: scaleId, lastValueVisible: !res.volume, priceLineVisible: false, title: '', crosshairMarkerVisible: !res.volume };
+      const common = { priceScaleId: scaleId, lastValueVisible: !res.volume, priceLineVisible: false, title: '', crosshairMarkerVisible: false }; // no dots on the crosshair
       if (!res.volume && !res.overlay) common.priceFormat = { type: 'price', precision: 2, minMove: 0.01 };
       if (res.overlay && !res.volume) common.priceFormat = { type: 'price', precision: S.priceDecimals, minMove: Math.pow(10, -S.priceDecimals) };
       if (res.volume) common.priceFormat = { type: 'volume' };
@@ -1014,9 +1081,10 @@ function updateIndicatorData(items) {
   items.forEach(({ res }, i) => {
     const it = app.ind.items[i];
     if (!it) return;
+    const prev = it.res;
     it.res = res;
     if (!it.inst.visible || res.error) return;
-    res.plots.forEach((p, j) => it.series[j]?.setData(seriesData(p)));
+    res.plots.forEach((p, j) => { if (it.series[j]) syncSeries(it.series[j], prev?.plots?.[j], p); });
     it.fillPrim?.update();
     if (it.markers[0]) it.markers[0].setMarkers(markersFor(res));
   });
@@ -1214,6 +1282,9 @@ function fmtVal(v, res) {
   return a >= 1e5 ? fmtNum(v) : v.toFixed(a < 1 ? 4 : 2);
 }
 
+// Called on every crosshair move and live tick: only text and colors of existing nodes change
+// (rebuilding nodes and re-measuring the layout here was a main cost while scrolling).
+let ohlcNodes = null;
 function updateLegendValues(idx) {
   const n = S.view.length;
   if (!n) return;
@@ -1221,27 +1292,39 @@ function updateLegendValues(idx) {
   const b = S.view[i], prev = S.view[i - 1];
   const o = $('#lg-ohlc');
   if (o && b) {
+    if (!ohlcNodes || !o.contains(ohlcNodes.o)) {
+      o.innerHTML = '';
+      const v = () => el('span');
+      ohlcNodes = { o: v(), h: v(), l: v(), c: v(), chg: el('span'), vol: el('span') };
+      o.append(
+        el('span', {}, el('b', {}, 'O '), ohlcNodes.o), el('span', {}, el('b', {}, 'H '), ohlcNodes.h),
+        el('span', {}, el('b', {}, 'L '), ohlcNodes.l), el('span', {}, el('b', {}, 'C '), ohlcNodes.c),
+        ohlcNodes.chg, el('span', {}, el('b', {}, 'Vol '), ohlcNodes.vol));
+    }
     const chg = prev ? b.close - prev.close : 0, pct = prev ? chg / prev.close * 100 : 0;
     const cls = b.close >= b.open ? 'up' : 'down';
-    o.innerHTML = '';
-    o.append(
-      el('span', {}, el('b', {}, 'O '), el('span', { class: cls }, app.fmtPrice(b.open))),
-      el('span', {}, el('b', {}, 'H '), el('span', { class: cls }, app.fmtPrice(b.high))),
-      el('span', {}, el('b', {}, 'L '), el('span', { class: cls }, app.fmtPrice(b.low))),
-      el('span', {}, el('b', {}, 'C '), el('span', { class: cls }, app.fmtPrice(b.close))),
-      el('span', { class: chg >= 0 ? 'up' : 'down' }, `${chg >= 0 ? '+' : ''}${app.fmtPrice(chg)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`),
-      el('span', {}, el('b', {}, 'Vol '), fmtNum(b.volume)));
+    for (const [k, v] of [['o', b.open], ['h', b.high], ['l', b.low], ['c', b.close]]) { ohlcNodes[k].textContent = app.fmtPrice(v); ohlcNodes[k].className = cls; }
+    ohlcNodes.chg.textContent = `${chg >= 0 ? '+' : ''}${app.fmtPrice(chg)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`;
+    ohlcNodes.chg.className = chg >= 0 ? 'up' : 'down';
+    ohlcNodes.vol.textContent = fmtNum(b.volume);
   }
-  for (const { it, vals } of legendRefs) {
-    if (!vals || !it.inst.visible) continue;
-    vals.innerHTML = '';
-    for (const p of it.res.plots) {
-      if (p.style === 'circles' && p.data[i] == null) continue;
-      const c = (p.colors && p.colors[i]) || p.color;
-      vals.append(el('span', { style: { color: c } }, fmtVal(p.data[i], it.res)));
+  for (const ref of legendRefs) {
+    const { it, vals } = ref;
+    if (!vals || !it.inst.visible || !it.res.plots) continue;
+    const j = i - resOff(it.res);
+    const plots = it.res.plots;
+    if (!ref.spans || ref.spans.length !== plots.length || !vals.contains(ref.spans[0])) {
+      vals.innerHTML = '';
+      ref.spans = plots.map(() => el('span'));
+      vals.append(...ref.spans);
     }
+    plots.forEach((p, k) => {
+      const v = j >= 0 ? p.data[j] : null, sp = ref.spans[k];
+      sp.hidden = p.style === 'circles' && v == null;
+      sp.textContent = fmtVal(v, it.res);
+      sp.style.color = (p.colors && j >= 0 && p.colors[j]) || p.color;
+    });
   }
-  positionPaneLegends();
 }
 
 // ======================================================================= top bar
@@ -1486,7 +1569,7 @@ function buildBottombar() {
       else applyRange(rg);
     } }, rg[0]));
   }
-  r.append(el('button', { class: 'bb-btn', title: 'Go to latest bar', onclick: () => app.chart.timeScale().scrollToRealTime() }, '⇥'));
+  r.append(el('button', { class: 'bb-btn', title: 'Go to latest bar', onclick: () => app.scrollToRecent() }, '⇥'));
   const tzWrap = $('#tz-select');
   const tzBtn = el('button', { class: 'bb-btn', id: 'tz-btn' });
   const renderTz = () => {
