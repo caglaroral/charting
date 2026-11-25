@@ -24,6 +24,8 @@ export function initPanels(a) {
   }
   $('#wl-add').onclick = () => addSymbolsDialog();
   $('#al-new').onclick = () => dialogs.alertDialog(app, { kind: 'price' });
+  $('#al-settings').onclick = () => dialogs.notifySettings(app);
+  $('#al-log-all').onclick = () => dialogs.alertLog(app);
   $('#al-notify').onclick = async () => {
     if (!('Notification' in window)) return toast('Browser notifications are not supported', 'error');
     const p = await Notification.requestPermission();
@@ -298,7 +300,7 @@ function renderAlerts() {
   if (!S.alerts.length) { list.append(el('div', { class: 'wl-empty' }, 'No alerts. Select a drawing and press 🔔, use … → Add alert on an indicator, or "+ Price alert".')); return; }
   for (const a of S.alerts) {
     const sw = el('button', { class: `switch ${a.active ? 'on' : ''}`, title: a.active ? 'Pause' : 'Activate', 'data-testid': 'al-toggle', onclick: async () => {
-      try { await api.saveAlert({ ...a, active: a.active ? 0 : 1 }); await loadAlerts(); } catch (e) { toast(e.message, 'error'); }
+      try { await api.saveAlert({ ...a, active: a.active ? 0 : 1 }); await loadAlerts(); loadLog(); } catch (e) { toast(e.message, 'error'); }
     } });
     list.append(el('div', { class: `al-item ${a.active ? '' : 'paused'}`, 'data-alert': a.id },
       sw,
@@ -307,10 +309,11 @@ function renderAlerts() {
         el('div', { class: 'al-desc' }, alertSummary(a)),
         a.message ? el('div', { class: 'al-desc' }, `“${a.message}”`) : null,
         el('div', { class: 'al-desc' }, `${a.frequency === 'once' ? 'Once' : 'Once per bar'} · triggered ${a.fired_count}×`)),
+      el('button', { class: 'lg-act', title: 'History', 'data-testid': 'al-history', html: ICONS.history, onclick: () => dialogs.alertLog(app, { alertId: a.id }) }),
       el('button', { class: 'lg-act', title: 'Edit', html: ICONS.gear, onclick: () => dialogs.alertDialog(app, { alert: a }) }),
       el('button', { class: 'lg-act', title: 'Delete', 'data-testid': 'al-delete', html: ICONS.close, onclick: async () => {
         if (!(await dialogs.confirm('Delete this alert?', { ok: 'Delete', danger: true }))) return;
-        await api.deleteAlert(a.id); await loadAlerts();
+        await api.deleteAlert(a.id); await loadAlerts(); loadLog();
       } })));
   }
 }
@@ -343,20 +346,25 @@ function beep() {
   } catch { /* autoplay blocked */ }
 }
 
-function logEvent(ev, prepend) {
-  const row = el('div', {}, el('span', { class: 'muted' }, new Date(ev.created_ms).toLocaleString('en-GB') + ' · '), ev.message,
-    el('span', { class: 'muted' }, ` @ ${fmtQuote(ev.price)}`));
-  const log = $('#al-log');
-  if (prepend) log.prepend(row); else log.append(row);
+// ---- alert history (latest entries in the Alerts tab; the full history is a dialog)
+async function loadLog() {
+  const box = $('#al-log');
+  try {
+    const { log } = await api.alertLog({ limit: 40 });
+    box.innerHTML = '';
+    if (!log.length) { box.append(el('div', { class: 'wl-empty' }, 'No alert activity yet.')); return; }
+    for (const e of log) box.append(dialogs.logRow(app, e, { compact: true }));
+  } catch { /* offline */ }
 }
-
 async function initEvents() {
+  app.loadAlertLog = loadLog; // `app` exists only once initPanels() has run
   try {
     const { events } = await api.alertEvents(0);
-    for (const ev of events) logEvent(ev, false);
     since = events.length ? Math.max(...events.map(e => e.created_ms)) : Date.now();
   } catch { since = Date.now(); }
+  loadLog();
   setInterval(pollEvents, 10000);
+  setInterval(() => { if (!$('#tab-alerts').hidden && !document.hidden) loadLog(); }, 30000); // delivery results arrive later
 }
 
 async function pollEvents() {
@@ -365,7 +373,6 @@ async function pollEvents() {
     if (!events.length) return;
     since = Math.max(since, ...events.map(e => e.created_ms));
     for (const ev of events.slice().reverse()) {
-      logEvent(ev, true);
       toast(ev.message, 'alert', `🔔 ${app.symbolName(ev.symbol)} @ ${fmtQuote(ev.price)}`, 10000);
       if ('Notification' in window && Notification.permission === 'granted') {
         try { new Notification(`🔔 ${app.symbolName(ev.symbol)}`, { body: ev.message }); } catch { /* */ }
@@ -374,5 +381,7 @@ async function pollEvents() {
     if ($('#tab-alerts').hidden) { unseen += events.length; renderBadge(); }
     beep();
     loadAlerts();
+    loadLog();
+    setTimeout(loadLog, 5000); // e-mail / Telegram / webhook results are logged a moment later
   } catch { /* offline */ }
 }

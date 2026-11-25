@@ -326,6 +326,21 @@ export function alertDialog(app, { kind, inst, drawing, alert } = {}) {
       chBoxes[c], { app: 'In-app', telegram: 'Telegram', email: 'E-mail', webhook: 'Webhook' }[c]);
   }));
   add('Notify via', chRow);
+  // Channels that are allowed but not set up yet: say so and link to the settings
+  const chHint = el('div', { class: 'ch-warn', hidden: true, 'data-testid': 'alert-ch-hint' });
+  add('', chHint);
+  api.notify().then((cfg) => {
+    const missing = [];
+    if (!cfg.email) missing.push('e-mail address');
+    if (!cfg.telegram_chat_id) missing.push('Telegram chat id');
+    if (!cfg.webhook_url) missing.push('webhook URL');
+    if (!cfg.server?.smtp) missing.push('SMTP server (admin)');
+    if (!cfg.server?.telegram) missing.push('Telegram bot (admin)');
+    if (!missing.length) return;
+    chHint.hidden = false;
+    chHint.append(`Not configured: ${missing.join(', ')}. `,
+      el('button', { class: 'link-btn', onclick: () => notifySettings(app) }, 'Notification settings…'));
+  }).catch(() => {});
 
   const isShape = () => plotSel && plotSel.selectedOptions[0]?.dataset.shape === '1';
   const renderConds = () => {
@@ -583,6 +598,88 @@ export async function plansAdmin() {
   return m;
 }
 
+// ======================================================================= alert history
+const EVENT_NAMES = { created: 'Created', updated: 'Edited', paused: 'Paused', resumed: 'Resumed', deleted: 'Deleted',
+  triggered: 'Triggered', delivered: 'Sent', failed: 'Failed', deactivated: 'Stopped' };
+const CHANNEL_NAMES = { app: 'in-app', telegram: 'Telegram', email: 'e-mail', webhook: 'webhook' };
+
+function fmtLogTime(ms) {
+  const d = new Date(ms);
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function logText(app, e) {
+  const price = e.price ? app.fmtPrice(e.price) : '';
+  const bar = e.bar_time ? ` · bar ${new Date(e.bar_time * 1000).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+  switch (e.event) {
+    case 'triggered': return `at ${price}${bar}`;
+    case 'delivered': return `via ${CHANNEL_NAMES[e.channel] || e.channel}`;
+    case 'failed': return `via ${CHANNEL_NAMES[e.channel] || e.channel}: ${e.detail}`;
+    case 'deactivated': return e.detail;
+    default: return e.detail || '';
+  }
+}
+
+/** One history entry (Alerts tab list or dialog). */
+export function logRow(app, e, { compact = false } = {}) {
+  return el('div', { class: 'log-row', 'data-event': e.event },
+    el('span', { class: `log-ev ev-${e.event}` }, EVENT_NAMES[e.event] || e.event),
+    el('div', { class: 'log-main' }, `${app.symbolName(e.symbol)} · ${e.summary}`),
+    el('div', { class: 'log-sub' }, `${fmtLogTime(e.created_ms)} · ${logText(app, e)}`));
+}
+
+/** Full alert history: filter by alert and event type, page back in time. */
+export async function alertLog(app, { alertId = '' } = {}) {
+  const S = app.S;
+  const alertSel = el('select', { 'data-testid': 'log-alert' },
+    el('option', { value: '' }, 'All alerts'),
+    (S.alerts || []).map(a => el('option', { value: a.id, selected: a.id === alertId }, `${app.symbolName(a.symbol)} · ${a.message || alertSummaryText(a)}`)));
+  if (alertId && !(S.alerts || []).some(a => a.id === alertId)) alertSel.append(el('option', { value: alertId, selected: true }, 'Deleted alert'));
+  const evSel = el('select', { 'data-testid': 'log-event' },
+    el('option', { value: '' }, 'All events'),
+    el('option', { value: 'triggered' }, 'Triggers'),
+    el('option', { value: 'delivered,failed' }, 'Deliveries'),
+    el('option', { value: 'failed' }, 'Failed deliveries'),
+    el('option', { value: 'created,updated,paused,resumed,deleted,deactivated' }, 'Changes'));
+  const tbody = el('tbody');
+  const more = el('button', { class: 'btn small', 'data-testid': 'log-more' }, 'Load older');
+  const empty = el('div', { class: 'wl-empty', hidden: true }, 'No entries.');
+  let oldest = 0;
+  const load = async (reset) => {
+    if (reset) { tbody.innerHTML = ''; oldest = 0; }
+    const { log } = await api.alertLog({ alert_id: alertSel.value, event: evSel.value, before: oldest || '', limit: 100 });
+    for (const e of log) {
+      tbody.append(el('tr', { 'data-event': e.event },
+        el('td', { class: 'nowrap' }, fmtLogTime(e.created_ms)),
+        el('td', { class: 'nowrap' }, el('span', { class: `log-ev ev-${e.event}` }, EVENT_NAMES[e.event] || e.event)),
+        el('td', {}, `${app.symbolName(e.symbol)} · ${e.summary}`),
+        el('td', {}, logText(app, e))));
+    }
+    if (log.length) oldest = log[log.length - 1].created_ms;
+    more.hidden = log.length < 100;
+    empty.hidden = !!tbody.children.length;
+  };
+  alertSel.onchange = evSel.onchange = () => load(true);
+  more.onclick = () => load(false);
+  modal({
+    title: 'Alert history', width: '980px',
+    body: el('div', {},
+      el('div', { class: 'log-filters' }, alertSel, evSel,
+        el('span', { class: 'muted', style: { alignSelf: 'center', fontSize: '12px' } }, 'Kept for 180 days. Deliveries are logged a few seconds after a trigger.')),
+      el('div', { class: 'log-table-wrap' }, el('table', { class: 'log-table', 'data-testid': 'log-table' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'Time'), el('th', {}, 'Event'), el('th', {}, 'Alert'), el('th', {}, 'Details'))), tbody), empty),
+      el('div', { style: { marginTop: '8px' } }, more)),
+  });
+  await load(true);
+}
+
+function alertSummaryText(a) {
+  const sp = a.spec || {};
+  if (a.kind === 'price') return `Price ${COND_NAMES[a.cond] || a.cond} ${sp.price}`;
+  if (a.kind === 'drawing') return `Drawing (${sp.tool || '?'}) ${COND_NAMES[a.cond] || a.cond}`;
+  return `${sp.name || sp.type} · ${sp.plot} ${COND_NAMES[a.cond] || a.cond}`;
+}
+
 export async function notifySettings(app) {
   const S = app.S;
   const cfg = await api.notify();
@@ -601,6 +698,11 @@ export async function notifySettings(app) {
     title: 'Alert notifications', width: '520px',
     body: el('div', {},
       el('div', { class: 'help' }, 'Alerts are evaluated on the server, so notifications arrive even when this page is closed.'),
+      el('div', { class: cfg.server?.smtp && cfg.server?.telegram ? 'ok-box' : 'err-box', style: { marginBottom: '10px' }, 'data-testid': 'notify-server-status' },
+        `Server: e-mail (SMTP) ${cfg.server?.smtp ? 'configured' : 'not configured'} · Telegram bot ${cfg.server?.telegram ? 'configured' : 'not configured'}`,
+        S.user?.is_admin && !(cfg.server?.smtp && cfg.server?.telegram)
+          ? el('span', {}, ' — ', el('button', { class: 'link-btn', onclick: () => { m.close(); notifyAdmin(app); } }, 'Notification servers…'))
+          : (!(cfg.server?.smtp && cfg.server?.telegram) ? ' — ask your administrator' : null)),
       el('div', { class: 'form-grid' },
         el('label', {}, 'E-mail'), email,
         el('label', {}, 'Telegram chat id'), chat,

@@ -100,3 +100,31 @@ test('TC-ALERT-05 notification settings are saved per user', async ({ page }) =>
   const bad = await page.evaluate(async () => (await fetch('/api/notify', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhook_url: 'ftp://x' }) })).status);
   expect(bad).toBe(400);
 });
+
+test('TC-ALERT-06 alert history: lifecycle, trigger, per-channel delivery result, auto stop', async ({ page }) => {
+  // an unreachable webhook makes one channel fail on purpose
+  await page.evaluate(() => fetch('/api/notify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ webhook_url: 'http://127.0.0.1:9/e2e-hook', default_channels: ['app'] }) }));
+  const id = await page.evaluate(async () => (await (await fetch('/api/alerts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: 'BINANCE:BTCUSDT', kind: 'price', cond: 'greater', frequency: 'once', spec: { price: 1 },
+      message: 'e2e history alert', channels: ['app', 'webhook'] }) })).json()).alert.id);
+  const events = () => page.evaluate(async (a) => (await (await fetch('/api/alerts/log?alert_id=' + a)).json()).log.map(e => e.event + (e.channel ? ':' + e.channel : '')), id);
+  // the engine (20 s pass) fires, then delivers in the background
+  await expect.poll(events, { timeout: 80_000, intervals: [3000] }).toEqual(expect.arrayContaining(['created', 'triggered', 'delivered:app', 'failed:webhook', 'deactivated']));
+  const failed = await page.evaluate(async (a) => (await (await fetch('/api/alerts/log?event=failed&alert_id=' + a)).json()).log[0], id);
+  expect(failed.ok).toBe(0);
+  expect(failed.detail.length).toBeGreaterThan(5); // the error text is kept
+
+  // Alerts tab shows the latest entries; the dialog filters by alert and event type
+  await page.click('.rp-tab[data-tab=alerts]');
+  await page.evaluate(() => __app.loadAlertLog());
+  await expect(page.locator('[data-testid=al-log] .log-row[data-event=failed]').first()).toContainText('webhook');
+  await page.click('[data-testid=al-log-all]');
+  await page.selectOption('[data-testid=log-event]', 'failed');
+  await expect(page.locator('[data-testid=log-table] tbody tr')).not.toHaveCount(0);
+  for (const ev of await page.locator('[data-testid=log-table] tbody tr').evaluateAll(rows => rows.map(r => r.dataset.event))) expect(ev).toBe('failed');
+  await page.keyboard.press('Escape');
+  // deleting is logged too
+  await page.evaluate((a) => fetch('/api/alerts/' + a, { method: 'DELETE' }), id);
+  await expect.poll(events).toContain('deleted');
+});

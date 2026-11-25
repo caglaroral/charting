@@ -61,6 +61,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-ALERT-03 | Alert engine | RSI greater than 0 | Server engine evaluates the indicator and fires; in-app toast |
 | TC-ALERT-04 | Plans | Free user: 6 alerts, e-mail channel | 6th → 402; e-mail refused and disabled in the dialog |
 | TC-ALERT-05 | Notifications | Save e-mail/webhook, invalid webhook | Persisted; invalid URL → 400 |
+| TC-ALERT-06 | History | Price alert with a failing webhook fires | Log has created, triggered, delivered (in-app), failed (webhook, with error), stopped, deleted; tab and dialog filters show it |
 | TC-ADMIN-01 | Data sources | Edit source, Test connection, Scan tables | Connected, OHLC tables listed |
 | TC-ADMIN-02 | Admin | Plans and Users dialogs; non-admin menu | Limits shown, plan assigned, no admin menu for users |
 | TC-PERSIST-01 | Workspace | Change symbol, timeframe, chart type, indicators, draw; logout/login | Everything restored |

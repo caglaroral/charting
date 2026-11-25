@@ -168,3 +168,24 @@ ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY id;
 
 ALTER TABLE charting.users ADD COLUMN IF NOT EXISTS plan String DEFAULT '' AFTER is_admin;
+
+-- Alert history: lifecycle (created, updated, paused, resumed, deleted, deactivated), every trigger
+-- and the delivery result of each notification channel. Kept 180 days.
+CREATE TABLE IF NOT EXISTS charting.alert_log
+(
+    user_id String,
+    alert_id String,
+    event LowCardinality(String),
+    symbol LowCardinality(String),
+    tf LowCardinality(String),
+    channel LowCardinality(String) DEFAULT '',
+    ok UInt8 DEFAULT 1,
+    price Float64 DEFAULT 0,
+    bar_time UInt32 DEFAULT 0,
+    summary String DEFAULT '',
+    detail String DEFAULT '',
+    created_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = MergeTree
+ORDER BY (user_id, created_at)
+TTL toDateTime(created_at) + INTERVAL 180 DAY;

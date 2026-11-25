@@ -65,6 +65,7 @@ export const api = {
   alerts: () => req('GET', '/api/alerts'),
   saveAlert: (a) => req('POST', '/api/alerts', a),
   deleteAlert: (id) => req('DELETE', '/api/alerts/' + encodeURIComponent(id)),
+  alertLog: (o = {}) => req('GET', '/api/alerts/log?' + qs(o)),
   alertEvents: (since) => req('GET', '/api/alerts/events?' + qs({ since })),
 
   scripts: () => req('GET', '/api/scripts'),

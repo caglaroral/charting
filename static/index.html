@@ -95,11 +95,12 @@
       <div class="al-head">
         <button class="btn small" id="al-new">+ Price alert</button>
         <div class="spacer"></div>
-        <button class="btn small ghost" id="al-notify" title="Allow browser notifications">Notifications</button>
+        <button class="btn small ghost" id="al-notify" title="Allow browser notifications">Browser</button>
+        <button class="btn small ghost" id="al-settings" title="E-mail, Telegram and webhook settings" data-testid="al-settings">Channels</button>
       </div>
       <div class="al-list" id="al-list"></div>
-      <div class="al-subhead">Tetiklenenler</div>
-      <div class="al-log" id="al-log"></div>
+      <div class="al-subhead"><span>Log</span><button class="link-btn" id="al-log-all" data-testid="al-log-all">Full history</button></div>
+      <div class="al-log" id="al-log" data-testid="al-log"></div>
     </section>
   </aside>
 

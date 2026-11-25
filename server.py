@@ -304,6 +304,9 @@ class Handler(BaseHTTPRequestHandler):
                 store.save_drawings(uid, sym, list(b.get("drawings", [])))
                 return self._json({"ok": True})
         if route == "alerts":
+            if method == "GET" and parts[1:2] == ["log"]:
+                return self._json({"log": alerts.list_log(uid, q.get("alert_id", ""), int(q.get("before", 0) or 0),
+                                                         int(q.get("limit", 100)), q.get("event", ""))})
             if method == "GET" and parts[1:2] == ["events"]:
                 return self._json({"events": alerts.list_events(uid, int(q.get("since", 0)), int(q.get("limit", 100)))})
             if method == "GET":
@@ -318,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
         if route == "notify":
             if method == "GET":
-                return self._json(notify.get_user(uid))
+                return self._json({**notify.get_user(uid), "server": notify.server_status()})
             if method in ("POST", "PUT") and parts[1:2] == ["test"]:
                 b = self._body()
                 chans = [c for c in b.get("channels", []) if c in notify.CHANNELS and c != "app"]

@@ -39,8 +39,31 @@ exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once 
 | E-mail | admin: SMTP host/port/security/user/password/from; user: address |
 | Webhook | user: URL — receives a JSON POST `{alert_id, symbol, tf, kind, cond, bar_time, price, message, count}` |
 
-Use **Send test** in the notification dialog to verify the configuration. Channels available to a
-user are limited by the plan.
+Where to set them up:
+
+- **User**: Alerts tab → **Channels** (or user menu → *Notifications…*): e-mail address, Telegram chat
+  id, webhook URL, default channels, **Send test**. The dialog also shows whether the server side
+  (SMTP, Telegram bot) is configured.
+- **Admin**: user menu → *Notification servers*: SMTP host/port/security/user/password/from and the
+  Telegram bot token.
+- The alert dialog lists channels that are not configured yet, with a link to the settings.
+
+Channels available to a user are limited by the plan.
+
+## History
+
+Every alert keeps a history (`alert_log`, 180 days):
+
+| Event | When |
+| --- | --- |
+| Created / Edited / Paused / Resumed / Deleted | changes made by the user |
+| Triggered | the engine fired the alert (price and bar time) |
+| Sent / Failed | result per channel: in-app, Telegram, e-mail, webhook; failures keep the error text |
+| Stopped | deactivated by the engine: *once* alerts after firing, or the drawing / custom indicator was deleted |
+
+The Alerts tab shows the latest entries; **Full history** (or the clock button on an alert) opens the
+complete log with filters (alert, triggers, deliveries, failed deliveries, changes) and paging.
+API: `GET /api/alerts/log?alert_id=&event=&before=&limit=`.
 
 ## Exchange rate limits
 

@@ -33,6 +33,12 @@ def get_global(reveal: bool = False) -> dict:
     return {"smtp": smtp, "telegram": tg}
 
 
+def server_status() -> dict:
+    """Which server-side channels an admin has set up (no secrets)."""
+    g = get_global()
+    return {"smtp": bool(g["smtp"].get("host")), "telegram": bool(g["telegram"].get("has_bot_token"))}
+
+
 def set_global(cfg: dict) -> None:
     cur = store.get_setting(GLOBAL_UID, "notify") or {}
     smtp_in, tg_in = cfg.get("smtp") or {}, cfg.get("telegram") or {}
@@ -136,7 +142,8 @@ def send(uid: str, channels: list[str], title: str, text: str, payload: dict) ->
     return result
 
 
-def dispatch(uid: str, channels: list[str], title: str, text: str, payload: dict) -> None:
+def dispatch(uid: str, channels: list[str], title: str, text: str, payload: dict, on_result=None) -> None:
+    """Deliver in the background; on_result({channel: 'ok' | error}) records the outcome (alert history)."""
     chans = [c for c in channels if c != "app"]
     if not chans:
         return
@@ -146,4 +153,9 @@ def dispatch(uid: str, channels: list[str], title: str, text: str, payload: dict
         bad = {k: v for k, v in res.items() if v != "ok"}
         if bad:
             print(f"notify {uid}: {bad}")
+        if on_result:
+            try:
+                on_result(res)
+            except Exception as e:  # history must never break delivery
+                print(f"notify history {uid}: {e}")
     _pool.submit(run)

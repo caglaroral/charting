@@ -31,7 +31,7 @@ CONDS = {"crossing", "crossing_up", "crossing_down", "greater", "less", "enterin
 LINE_TOOLS = {"trend", "ray", "extended", "hline", "hray"}
 ZONE_TOOLS = {"rect", "channel"}
 
-COND_TR = {
+COND_TEXT = {
     "crossing": "crossing", "crossing_up": "crossing up", "crossing_down": "crossing down",
     "greater": "greater than", "less": "less than", "entering": "entering channel", "exiting": "exiting channel",
     "signal": "signal",
@@ -57,6 +57,50 @@ def _row_out(r: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- CRUD
+
+# --------------------------------------------------------------------------- history
+LOG_EVENTS = ("created", "updated", "paused", "resumed", "deleted", "triggered", "delivered", "failed", "deactivated")
+
+
+def log(uid: str, alert: dict, event: str, **kw) -> None:
+    """Append one history row; never raises into the caller (history must not break alerts)."""
+    try:
+        log_many([dict(user_id=uid, alert_id=alert.get("id", ""), event=event, symbol=alert.get("symbol", ""),
+                       tf=alert.get("tf", ""), summary=_summary(alert), **kw)])
+    except Exception:
+        traceback.print_exc()
+
+
+def log_many(rows: list[dict]) -> None:
+    for r in rows:
+        r["detail"] = str(r.get("detail", ""))[:500]
+    if rows:
+        ch.insert(f"{DB}.alert_log", rows)
+
+
+def _summary(alert: dict) -> str:
+    try:
+        return alert.get("message") or _default_message(alert)
+    except Exception:
+        return alert.get("symbol", "")
+
+
+def list_log(uid: str, alert_id: str = "", before_ms: int = 0, limit: int = 100, event: str = "") -> list[dict]:
+    where = ["user_id = {u:String}"]
+    params = {"u": uid, "n": max(1, min(int(limit), 500))}
+    if alert_id:
+        where.append("alert_id = {a:String}"); params["a"] = alert_id
+    if before_ms:
+        where.append("created_at < fromUnixTimestamp64Milli(toInt64({b:UInt64}))"); params["b"] = int(before_ms)
+    if event:
+        evs = [e for e in event.split(",") if e in LOG_EVENTS]
+        if evs:
+            where.append("event IN {e:Array(String)}"); params["e"] = evs
+    return ch.query(
+        f"SELECT alert_id, event, symbol, tf, channel, ok, price, bar_time, summary, detail, "
+        f"toUnixTimestamp64Milli(created_at) AS created_ms FROM {DB}.alert_log WHERE {' AND '.join(where)} "
+        f"ORDER BY created_at DESC LIMIT {{n:UInt32}}", params)
+
 
 def list_alerts(uid: str) -> list[dict]:
     rows = ch.query(f"SELECT {_COLS} FROM {DB}.alerts FINAL WHERE user_id = {{u:String}} AND deleted = 0 "
@@ -138,10 +182,23 @@ def save_alert(user, a: dict) -> dict:
     if existing:
         row["created_at"] = f"{existing['created_ms'] // 1000}.{existing['created_ms'] % 1000:03d}"
     ch.insert(f"{DB}.alerts", [row])
-    return get_alert(uid, row["id"])
+    saved = get_alert(uid, row["id"])
+    if not existing:
+        ev = "created"
+    elif existing["active"] and not active:
+        ev = "paused"
+    elif active and not existing["active"]:
+        ev = "resumed"
+    else:
+        ev = "updated"
+    log(uid, saved, ev, detail="channels: " + ", ".join(saved["channels"]))
+    return saved
 
 
 def delete_alert(uid: str, aid: str) -> None:
+    old = get_alert(uid, aid)
+    if old:
+        log(uid, old, "deleted")
     ch.insert(f"{DB}.alerts", [{"user_id": uid, "id": aid, "symbol": "", "tf": "", "kind": "", "cond": "",
                                 "spec": "{}", "channels": "[]", "active": 0, "deleted": 1, "updated_at": store._ts(store._now_ms())}])
 
@@ -314,7 +371,7 @@ def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None):
 
 def _default_message(alert):
     spec = alert["spec"]
-    c = COND_TR.get(alert["cond"], alert["cond"])
+    c = COND_TEXT.get(alert["cond"], alert["cond"])
     if alert["kind"] == "price":
         return f"{alert['symbol']} price {c} {spec['price']}"
     if alert["kind"] == "drawing":
@@ -400,15 +457,32 @@ def run_once() -> int:
             if not cur or int(cur[0]["u"]) != a["updated_ms"]:
                 continue
             msg = a["message"] or _default_message(a)
+            base = dict(user_id=a["user_id"], alert_id=a["id"], symbol=symbol, tf=tf, summary=msg)
             if fired:
                 ch.insert(f"{DB}.alert_events", [{
                     "user_id": a["user_id"], "alert_id": a["id"], "symbol": symbol, "tf": tf,
                     "bar_time": t, "price": p, "message": msg} for t, p in fired])
                 fired_total += len(fired)
                 t, p = fired[-1]
+                try:
+                    log_many([dict(base, event="triggered", price=fp, bar_time=int(ft)) for ft, fp in fired]
+                             + [dict(base, event="delivered", channel="app", price=p, bar_time=int(t), detail="in-app notification")])
+                except Exception:
+                    traceback.print_exc()
+
+                def delivered(result, base=base, t=t, p=p):
+                    log_many([dict(base, event="delivered" if r == "ok" else "failed", channel=c, ok=int(r == "ok"),
+                                   price=p, bar_time=int(t), detail="" if r == "ok" else r) for c, r in result.items()])
                 notify.dispatch(a["user_id"], a["channels"], f"🔔 {symbol} alert", msg, {
                     "alert_id": a["id"], "symbol": symbol, "tf": tf, "kind": a["kind"], "cond": a["cond"],
-                    "bar_time": t, "price": p, "message": msg, "count": len(fired)})
+                    "bar_time": t, "price": p, "message": msg, "count": len(fired)}, on_result=delivered)
+            if deactivate or (fired and a["frequency"] == "once"):
+                reason = ("triggered (frequency: once)" if fired and not deactivate else
+                          "the drawing was deleted" if a["kind"] == "drawing" else "the custom indicator was deleted")
+                try:
+                    log_many([dict(base, event="deactivated", detail=reason)])
+                except Exception:
+                    traceback.print_exc()
             row = {
                 "user_id": a["user_id"], "id": a["id"], "symbol": symbol, "tf": tf, "kind": a["kind"],
                 "cond": a["cond"], "spec": json.dumps(a["spec"], separators=(",", ":")),
