@@ -50,6 +50,7 @@ export async function closeModals(page) {
 
 export async function resetLayout(page) {
   await page.evaluate(async () => {
+    window.__app?.saveLayout?.cancel?.(); // a pending debounced save would write the old layout back
     await fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: null }) });
   });
 }
