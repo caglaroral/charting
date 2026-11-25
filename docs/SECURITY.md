@@ -35,9 +35,14 @@ Custom indicators are untrusted code and run isolated on both sides.
 **Browser** (`static/js/sandbox.js`):
 - a hidden `<iframe sandbox="allow-scripts">` (opaque origin: no cookies, no access to the app DOM or
   API) with a CSP of `default-src 'none'` (no network);
-- inside it a Web Worker executes the code; a run longer than 3 s terminates the worker, so the page
-  never freezes;
-- only plain data (bars, inputs, results) crosses the boundaries via `postMessage`.
+- the iframe creates the Web Worker that executes the code, so the worker inherits the iframe's opaque
+  origin and CSP; a run longer than 3 s makes the iframe replace the worker, so the page never freezes;
+- runs and results travel over a `MessageChannel` port handed to the worker (they do not pass through
+  the iframe); only plain data crosses: code text, inputs, bars as transferred `Float64Array` columns
+  (only the changed part after the first run) and results.
+
+Do not create the worker from the page itself: it would run in the app's origin, where user code
+could call the API with the user's session cookie.
 
 **Server** (`backend/jsrunner.py`, `backend/jsworker.js`):
 - the whole indicator runtime is evaluated inside a fresh `vm` context per request and only strings

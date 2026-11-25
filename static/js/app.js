@@ -785,8 +785,14 @@ async function computeIndicator(inst) {
 }
 
 // Run user code in the sandbox on the chart bars; fetches security() timeframes on demand.
+// Timeframes a script asked for via security(), remembered per code + chart timeframe, so the data is
+// ready before the first run (otherwise every recompute ran the script twice).
+const htfNeeds = new Map();
 export async function runCustom(code, params = {}) {
   const env = { tf: S.tf, tfSec: TF_SEC[S.tf], tfSecs: TF_SEC, htf: {} };
+  const key = S.tf + '|' + code;
+  const known = htfNeeds.get(key) || [];
+  for (const tf of known) env.htf[tf] = await getHtfBars(tf);
   for (let round = 0; round < 4; round++) {
     const res = await app.sandbox.run(code, S.view, params, env);
     if (!res.requests.length) return res;
@@ -794,6 +800,8 @@ export async function runCustom(code, params = {}) {
       if (!TF_SEC[tf]) throw new Error(`security(): unknown timeframe "${tf}"`);
       env.htf[tf] = await getHtfBars(tf);
     }
+    htfNeeds.set(key, Object.keys(env.htf));
+    if (htfNeeds.size > 200) htfNeeds.delete(htfNeeds.keys().next().value);
   }
   throw new Error('security() data unavailable');
 }

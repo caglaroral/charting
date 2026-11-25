@@ -47,7 +47,7 @@ No build step: ES modules served as files; lightweight-charts 5.2.1 and CodeMirr
 | `drawings.js` | drawing registry and manager: a series primitive renders every tool through a small canvas helper that records geometry for hit-testing; selection, handles, drag, undo/redo, persistence diff |
 | `indicators.js` | built-in indicator definitions and math (shared with the server) |
 | `script.js` | ChartScript runtime (shared with the server) |
-| `sandbox.js` | sandboxed iframe + web worker that runs user code |
+| `sandbox.js` | sandboxed iframe creates the web worker that runs user code; page ↔ worker over a MessageChannel, bars sent as deltas |
 | `live.js` | exchange REST + multiplexed websocket |
 | `panels.js` | watchlists, symbol info, alerts list, alert notifications |
 | `dialogs.js` | symbol search, indicator picker/settings, script editor, alert dialog, admin dialogs |
