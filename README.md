@@ -40,9 +40,13 @@ The backend creates the `charting` database and its tables on start, and registe
 `backtest_*_klines` tables as the `BINANCE` data source the first time it runs. Further data sources
 are added in the UI: **user menu → Data Sources (ClickHouse)**.
 
+Containers: `frontend` (nginx, port 8080), `backend` (Python 3.15 API and alert engine) and
+`jsworker` (Node 26, runs indicator code for server-side alerts with no network at all; see
+[docs/SECURITY.md](docs/SECURITY.md)).
+
 ## Running without Docker
 
-Requirements: Python ≥ 3.11 and Node ≥ 20 (for the server-side indicator sandbox). No pip / npm
+Requirements: Python ≥ 3.11 and Node ≥ 20, Node ≥ 25 recommended (for the server-side indicator sandbox; from 25 Node's permission model also blocks network access). No pip / npm
 packages are needed at runtime.
 
 ```bash

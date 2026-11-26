@@ -44,21 +44,31 @@ Custom indicators are untrusted code and run isolated on both sides.
 Do not create the worker from the page itself: it would run in the app's origin, where user code
 could call the API with the user's session cookie.
 
-**Server** (`backend/jsrunner.py`, `backend/jsworker.js`):
+**Server** (`backend/jsrunner.py`, `backend/jsworker.js`, `backend/jsgate.js`):
+
+With Docker the code runs in its own container, `jsworker`:
+- `network_mode: none`: the container has only a loopback interface, no route anywhere (not to
+  ClickHouse, the LAN, the backend or the internet);
+- read-only root file system, all capabilities dropped, `no-new-privileges`, user `nobody`, memory
+  and process limits;
+- no secrets: it gets neither `.env` nor any backend environment variable;
+- the backend reaches it only through a Unix socket on the shared `jsrun` volume. `jsgate.js`
+  starts a fresh worker process per connection and kills it when the connection closes; the backend
+  closes the connection when a request misses its deadline.
+
+Inside the container, and also when running without Docker:
 - the whole indicator runtime is evaluated inside a fresh `vm` context per request and only strings
   cross the boundary, so no host-realm object (`process`, host `Function`) is reachable;
 - `vm` timeout and `microtaskMode: 'afterEvaluate'` stop synchronous and promise loops; WebAssembly
   is disabled;
-- Node's permission model allows reading only the runtime files — no file writes, child processes or
-  worker threads;
-- the process runs as `nobody` (`setpriv`), with address-space and file limits (`prlimit`) and, when
-  the host allows it, in an empty network namespace (`unshare --net`). In Docker the network
-  namespace needs `cap_add: [SYS_ADMIN]` (commented in `docker-compose.yml`); without it the other
-  layers still apply;
-- the worker starts with an empty environment (only `PATH`), so it never holds `CH_PASSWORD`,
-  `SECRET_KEY` or any other secret of the backend;
+- Node's permission model (`--permission`) allows reading only the runtime files: no file writes,
+  child processes or worker threads, and from Node 25 no network access either;
+- the worker process starts with an empty environment;
+- without Docker it runs as `nobody` (`setpriv`) with limits (`prlimit`) and, when the host allows
+  it, in an empty network namespace (`unshare --net`);
 - each request has a wall-clock deadline; a hung or crashed worker is killed and restarted.
 
-Even so, `vm` is not a complete security boundary on its own; the OS-level layers above are what
-make server-side execution of other users' code acceptable. For hostile multi-tenant use consider
-running the worker in a dedicated container with `network_mode: none`.
+Why the network matters: `vm` is not a complete security boundary on its own. If user code ever
+escaped it, the worker process is shared by all users' alerts, so it could read other users' scripts
+and bars passing through it. Without a network it cannot send them anywhere, cannot reach internal
+services, and cannot use the server's IP (e.g. against the shared exchange rate limit).

@@ -69,7 +69,7 @@ server evaluates indicators with **exactly** the JavaScript the browser runs.
 | `market.py` | bars, symbol list, quotes, symbol info |
 | `live.py` | exchange REST with weight budget and bar cache |
 | `alerts.py` | alert CRUD + evaluation engine thread |
-| `jsrunner.py` / `jsworker.js` | sandboxed Node worker for indicator calculations |
+| `jsrunner.py` / `jsworker.js` / `jsgate.js` | sandboxed Node worker for indicator calculations; in Docker a separate `jsworker` container without network, reached over a Unix socket |
 | `notify.py` | Telegram, SMTP, webhook delivery |
 | `plans.py` | subscription plans and limit checks |
 

@@ -6,8 +6,10 @@
 //     cross the boundary, so no host-realm object (and thus no host Function/process) is reachable.
 //  2. vm timeout + microtaskMode 'afterEvaluate' bound sync loops and promise loops; wasm disabled.
 //  3. The process runs with Node's permission model (fs read limited to code, no fs write, no child
-//     processes, no worker threads) and, when started by root, as user nobody in an empty network
-//     namespace with a memory cap (see jsrunner.py).
+//     processes, no worker threads; from Node 25 no network either) and an empty environment.
+//  4. In Docker it runs in its own container without any network, read-only, as nobody, started per
+//     connection by jsgate.js. Locally (jsrunner.py) it runs as nobody, in an empty network
+//     namespace when possible, with a memory cap.
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';

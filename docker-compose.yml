@@ -8,12 +8,33 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8080
+      JSRUN_SOCKET: /run/jsrun/jsrun.sock
     # Mount .env so SECRET_KEY generated on first start is persisted on the host
     volumes:
       - ./.env:/app/.env
+      - jsrun:/run/jsrun
+    depends_on:
+      jsworker:
+        condition: service_healthy
     restart: unless-stopped
-    # Optional: lets the indicator sandbox run user code without network access (unshare --net).
-    # cap_add: [SYS_ADMIN]
+
+  # Runs indicator code for server-side alerts, including user-written custom indicators.
+  # No network at all, read-only, no capabilities, unprivileged user, no secrets in its environment.
+  # The backend talks to it only through the Unix socket on the "jsrun" volume.
+  jsworker:
+    build:
+      context: .
+      dockerfile: docker/jsworker.Dockerfile
+    network_mode: none
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    pids_limit: 64
+    volumes:
+      - jsrun:/run/jsrun
+    restart: unless-stopped
 
   frontend:
     build:
@@ -25,3 +46,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  jsrun:
