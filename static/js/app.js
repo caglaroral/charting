@@ -1191,7 +1191,7 @@ class PineHistogram {
         const y = priceToCoordinate(v);
         if (y == null) continue;
         const by = Math.round(y * vr), x = Math.round(b.x * hr) - Math.floor(w / 2);
-        ctx.fillStyle = b.originalData.color || o.color;
+        ctx.fillStyle = b.barColor || o.color; // LWC moves the item's `color` into barColor
         ctx.fillRect(x, Math.min(by, by0), w, Math.max(1, Math.abs(by - by0)));
       }
     });

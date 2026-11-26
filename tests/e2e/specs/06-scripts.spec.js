@@ -67,6 +67,32 @@ test('TC-SCRIPT-04 SqueezeWt port renders in its own pane with signals', async (
   // style 'histogram', width 4 is drawn like Pine: 4px bars, not as wide as the bar spacing
   const hist = await page.evaluate(() => { const s = __app.ind.items.find(i => i.res.name === 'SqueezeWt').series[0]; return { type: s.seriesType(), w: s.options().barWidth }; });
   expect(hist).toEqual({ type: 'Custom', w: 4 });
+  // ... in each bar's own color (green / maroon / magenta / lime), not the plot's default color
+  await page.mouse.move(5, 5);
+  const px = await page.evaluate(() => {
+    const it = __app.ind.items.find(i => i.res.name === 'SqueezeWt');
+    const p = it.res.plots[0], s = it.series[0], off = __app.S.view.length - p.data.length;
+    const pane = __app.chart.panes()[it.pane].getHTMLElement();
+    const r = __app.chart.timeScale().getVisibleLogicalRange();
+    const hex = (c) => c.startsWith('#') ? [1, 3, 5].map(j => parseInt(c.slice(j, j + 2), 16)) : c.match(/\d+/g).map(Number).slice(0, 3);
+    const out = [];
+    for (let i = Math.ceil(r.to) - 3; i > r.from + 3 && out.length < 6; i--) {
+      const v = p.data[i - off], c = p.colors?.[i - off];
+      if (v == null || !c || Math.abs(v) < 1) continue;
+      const x = __app.chart.timeScale().logicalToCoordinate(i), y = (s.priceToCoordinate(v) + s.priceToCoordinate(0)) / 2;
+      let got = null;
+      for (const cv of pane.querySelectorAll('canvas')) {
+        const k = cv.width / cv.clientWidth, d = cv.getContext('2d').getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data;
+        if (d[3] > 200) { got = [d[0], d[1], d[2]]; break; }
+      }
+      out.push({ want: hex(c), got });
+    }
+    return out;
+  });
+  expect(px.length).toBeGreaterThan(2);
+  // other plots (the translucent WT area, lines) may cover a bar: most probes must show the bar color
+  const ok = px.filter(({ want, got }) => got && got.every((v, j) => Math.abs(v - want[j]) < 40)).length;
+  expect(ok).toBeGreaterThanOrEqual(px.length - 2);
   await expect(page.locator('.pane-legend')).toContainText('SqueezeWt 20 2 20 1.5 14 3 3 3 14 14 close 60 21 14 1.9 -1.3 10 21 0.015 60 53 -60 -53');
   await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
   expect(errors).toEqual([]);
