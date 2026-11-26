@@ -55,6 +55,8 @@ could call the API with the user's session cookie.
   the host allows it, in an empty network namespace (`unshare --net`). In Docker the network
   namespace needs `cap_add: [SYS_ADMIN]` (commented in `docker-compose.yml`); without it the other
   layers still apply;
+- the worker starts with an empty environment (only `PATH`), so it never holds `CH_PASSWORD`,
+  `SECRET_KEY` or any other secret of the backend;
 - each request has a wall-clock deadline; a hung or crashed worker is killed and restarted.
 
 Even so, `vm` is not a complete security boundary on its own; the OS-level layers above are what

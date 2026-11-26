@@ -7,6 +7,7 @@ Sandbox (outermost first, each applied when available):
   - prlimit                : address-space and CPU-time limits
   - node --experimental-permission : fs read only for code files, no fs write / child_process / workers
   - vm context per request : see jsworker.js
+The worker gets an empty environment (no secrets), so an escape cannot read credentials.
 Every request has a wall-clock deadline; a hung or crashed worker is killed and restarted.
 """
 import json
@@ -69,8 +70,11 @@ def _command() -> list[str]:
 
 
 def _start() -> subprocess.Popen:
+    # Empty environment: the worker must never see secrets (CH_PASSWORD, SECRET_KEY, ...) even if
+    # user code escaped the vm context and could read process.env.
+    env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
     return subprocess.Popen(_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd="/")
+                            stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd="/", env=env)
 
 
 def _kill():
