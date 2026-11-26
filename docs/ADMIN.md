@@ -12,6 +12,11 @@ All admin screens are in the **user menu** (top right) of an admin account.
    the name (`…_1m_…`, `…_1h_…`, `…_1d_…`).
 3. Tick one table per timeframe and check the **column mapping** (symbol, time, open, high, low,
    close, volume). The time column must be `DateTime`/`DateTime64`.
+   Table names can also be typed: **+ Add table or view** adds a row, and the name field suggests
+   every table and view of the database (the *Type* column shows table / view / materialized view).
+   A view works like a table; all tables share one column mapping, so a view with other column names
+   should rename them (`SELECT ts AS timestamp, …`). On **Save** the server checks that every table
+   exists and has the mapped columns; two tables for one timeframe are rejected.
 4. **Live data**: Binance USDT-M Futures / Binance Spot / none.
 
 Missing timeframes are aggregated from the largest smaller table that divides them (e.g. 30m from

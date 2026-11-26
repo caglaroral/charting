@@ -210,9 +210,17 @@ def save(cfg: dict) -> dict:
         raise ValueError("Prefix must be 1-20 chars of A-Z 0-9 _")
     if not cfg.get("url") or not cfg.get("database"):
         raise ValueError("URL and database are required")
-    tables = {tf: str(t) for tf, t in (cfg.get("tables") or {}).items() if tf in APP_TFS and t}
+    tables = {tf: str(t).strip() for tf, t in (cfg.get("tables") or {}).items() if tf in APP_TFS and str(t or "").strip()}
     if not tables and not cfg.get("live"):
         raise ValueError("Select a table for at least one timeframe (or a live provider)")
+    columns = {**DEFAULT_COLUMNS, **{k: str(v).strip() for k, v in (cfg.get("columns") or {}).items() if str(v or "").strip()}}
+    if tables:
+        try:
+            check_tables({**cfg, "id": cfg.get("id")}, tables, columns)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Could not check the tables: {e}")
     sid = cfg.get("id") or uuid.uuid4().hex
     others = [s for s in sources(enabled_only=False) if s.id != sid]
     if any(s.prefix == prefix for s in others):
@@ -230,7 +238,7 @@ def save(cfg: dict) -> dict:
         "id": sid, "name": str(cfg.get("name") or prefix)[:100], "prefix": prefix, "url": url,
         "user": str(cfg.get("user") or "default"), "password_enc": encrypt(password),
         "database": str(cfg["database"]), "tables": json.dumps(tables),
-        "columns": json.dumps({**DEFAULT_COLUMNS, **(cfg.get("columns") or {})}),
+        "columns": json.dumps(columns),
         "live": cfg.get("live") if cfg.get("live") in ("binance-futures", "binance-spot") else "",
         "enabled": int(cfg.get("enabled", True)), "sort": int(cfg.get("sort") or 0),
         "updated_at": f"{time.time():.3f}",
@@ -284,12 +292,36 @@ def test_connection(cfg: dict) -> dict:
     return {"version": ver, "databases": dbs}
 
 
+def _kind(engine: str) -> str:
+    return {"View": "view", "MaterializedView": "materialized view", "Dictionary": "dictionary"}.get(engine, "table")
+
+
+def check_tables(cfg: dict, tables: dict, columns: dict) -> None:
+    """Every selected table or view must exist and have the mapped columns (raises ValueError)."""
+    c = _client(cfg)
+    rows = c.query(
+        "SELECT table, name FROM system.columns WHERE database = {d:String} AND table IN {t:Array(String)}",
+        {"d": cfg["database"], "t": sorted(set(tables.values()))})
+    have: dict = {}
+    for r in rows:
+        have.setdefault(r["table"], set()).add(r["name"])
+    need = [columns[k] for k in ("symbol", "time", "open", "high", "low", "close", "volume")]
+    for tf, t in tables.items():
+        if t not in have:
+            raise ValueError(f"{tf}: table or view {cfg['database']}.{t} does not exist")
+        missing = [x for x in need if x not in have[t]]
+        if missing:
+            raise ValueError(f"{tf}: {t} has no column {', '.join(missing)} (see the column mapping below)")
+
+
 def discover(cfg: dict) -> dict:
     """List tables in the database with OHLCV-like columns, guessing timeframe + column mapping."""
     c = _client(cfg)
     rows = c.query(
         "SELECT table, name, type FROM system.columns WHERE database = {d:String} ORDER BY table, position",
         {"d": cfg["database"]})
+    engines = {r["name"]: r["engine"] for r in c.query(
+        "SELECT name, engine FROM system.tables WHERE database = {d:String}", {"d": cfg["database"]})}
     tables: dict = {}
     for r in rows:
         tables.setdefault(r["table"], []).append({"name": r["name"], "type": r["type"]})
@@ -301,6 +333,7 @@ def discover(cfg: dict) -> dict:
             mapping[k] = next((names[c_] for c_ in cands if c_ in names), None)
         ohlc = all(mapping[k] for k in ("time", "open", "high", "low", "close"))
         tf = next((tf for tf, pat in _TF_PATTERNS if re.search(pat, t, re.I)), None)
-        out.append({"table": t, "columns": cols, "mapping": mapping, "ohlc": ohlc, "tf_guess": tf})
+        out.append({"table": t, "columns": cols, "mapping": mapping, "ohlc": ohlc, "tf_guess": tf,
+                    "kind": _kind(engines.get(t, ""))})
     out.sort(key=lambda x: (not x["ohlc"], x["table"]))
     return {"tables": out, "timeframes": list(APP_TFS.keys())}

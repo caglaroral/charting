@@ -15,6 +15,29 @@ test('TC-ADMIN-01 data source dialog tests the ClickHouse connection and scans t
   expect(await page.locator('.ds-tables tr').count()).toBeGreaterThan(5);
 });
 
+test('TC-ADMIN-03 timeframe tables can be typed by name (tables or views) and are checked on save', async ({ page }) => {
+  await login(page, admin());
+  await page.click('#user-btn');
+  await page.click('[data-testid=menu-datasources]');
+  await page.locator('.ds-item button:has-text("Edit")').first().click();
+  // existing rows are editable inputs; the type comes from the database
+  await expect(page.locator('[data-testid=ds-table-0]')).toBeEditable();
+  await expect(page.locator('.ds-tables tr').nth(1).locator('td').nth(2)).toHaveText(/table|view/);
+  expect(await page.locator('#ds-table-list option').count()).toBeGreaterThan(3); // suggestions
+  const n = await page.locator('[data-testid^=ds-table-]').count();
+  await page.click('[data-testid=ds-add-table]');
+  await page.fill(`[data-testid=ds-table-${n}]`, 'no_such_table_e2e');
+  await page.selectOption(`[data-testid=ds-tf-${n}]`, '30m');
+  await page.click('[data-testid=ds-save]');
+  // rejected by the server: nothing is saved
+  await expect(page.locator('.toast', { hasText: 'no_such_table_e2e does not exist' })).toBeVisible();
+  // two tables for one timeframe are rejected before saving
+  await page.fill(`[data-testid=ds-table-${n}]`, await page.inputValue('[data-testid=ds-table-0]'));
+  await page.selectOption(`[data-testid=ds-tf-${n}]`, await page.inputValue('[data-testid=ds-tf-0]'));
+  await page.click('[data-testid=ds-save]');
+  await expect(page.locator('.toast', { hasText: 'Two tables are set for' })).toBeVisible();
+});
+
 test('TC-ADMIN-02 plans and users dialogs; non-admins do not see admin menus', async ({ page, browser }) => {
   await login(page, admin());
   await page.click('#user-btn');

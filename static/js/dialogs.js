@@ -448,16 +448,32 @@ export async function datasourceAdmin(app) {
       id: d.id, url: `${f.scheme.value}://${f.host.value.trim()}:${f.port.value.trim() || 8123}`, user: f.user.value,
       password: f.password.value || (d.id ? undefined : ''), database: f.database.value,
     });
+    let allTables = null; // [{table, kind, ohlc}] from the last scan: suggestions for the table inputs
+    const tableList = el('datalist', { id: 'ds-table-list' });
+    const fillTableList = () => {
+      tableList.innerHTML = '';
+      for (const t of allTables || []) tableList.append(el('option', { value: t.table }, `${t.kind}${t.ohlc ? '' : ' · no OHLC columns found'}`));
+    };
+    const kindOf = (name) => (allTables || []).find(t => t.table === name)?.kind || '';
     const renderTables = () => {
       tablesBox.innerHTML = '';
-      if (!tableRows.length) { tablesBox.append(el('div', { class: 'help' }, 'No tables selected. Use "Scan tables" to find OHLCV tables.')); return; }
-      const tb = el('table', { class: 'ds-tables' }, el('tr', {}, el('th', {}, 'Use'), el('th', {}, 'Table'), el('th', {}, 'Timeframe'), el('th', {}, 'Columns')));
-      for (const r of tableRows) {
+      const tb = el('table', { class: 'ds-tables' }, el('tr', {}, el('th', {}, 'Use'), el('th', {}, 'Table or view'), el('th', {}, 'Type'), el('th', {}, 'Timeframe'), el('th', {}, 'Columns'), el('th', {})));
+      tableRows.forEach((r, i) => {
         const use = el('input', { type: 'checkbox', checked: r.use, onchange: (e) => { r.use = e.target.checked; } });
-        const tf = el('select', { onchange: (e) => { r.tf = e.target.value; } }, el('option', { value: '' }, '—'), tfs.map(t => el('option', { value: t, selected: t === r.tf }, t)));
-        tb.append(el('tr', {}, el('td', {}, use), el('td', {}, r.table), el('td', {}, tf), el('td', { class: 'muted' }, r.ohlc === false ? 'no OHLC' : r.mapping ? Object.values(r.mapping).filter(Boolean).join(', ') : '')));
-      }
-      tablesBox.append(el('div', { class: 'table-wrap' }, tb));
+        const kind = el('td', { class: 'muted' }, kindOf(r.table));
+        const name = el('input', { value: r.table, list: 'ds-table-list', placeholder: 'table or view name', spellcheck: 'false',
+          'data-testid': `ds-table-${i}`, style: { width: '100%', minWidth: '180px' },
+          onfocus: () => { if (!allTables && f.database.value) discover(true); },
+          oninput: (e) => { r.table = e.target.value.trim(); kind.textContent = kindOf(r.table); } });
+        const tf = el('select', { 'data-testid': `ds-tf-${i}`, onchange: (e) => { r.tf = e.target.value; } }, el('option', { value: '' }, '—'), tfs.map(t => el('option', { value: t, selected: t === r.tf }, t)));
+        const del = el('button', { class: 'btn ghost icon', title: 'Remove row', html: ICONS.trash, onclick: () => { tableRows.splice(i, 1); renderTables(); } });
+        tb.append(el('tr', {}, el('td', {}, use), el('td', {}, name), kind, el('td', {}, tf),
+          el('td', { class: 'muted' }, r.ohlc === false ? 'no OHLC' : r.mapping ? Object.values(r.mapping).filter(Boolean).join(', ') : ''), el('td', {}, del)));
+      });
+      if (!tableRows.length) tablesBox.append(el('div', { class: 'help' }, 'No tables selected. Use "Scan tables" to find OHLCV tables, or add a table or view by name.'));
+      else tablesBox.append(el('div', { class: 'table-wrap' }, tb));
+      tablesBox.append(tableList, el('button', { class: 'btn', style: { marginTop: '6px' }, 'data-testid': 'ds-add-table',
+        onclick: () => { tableRows.push({ table: '', tf: '', use: true }); renderTables(); tablesBox.querySelector(`[data-testid="ds-table-${tableRows.length - 1}"]`)?.focus(); } }, '+ Add table or view'));
     };
     const test = async () => {
       status.innerHTML = ''; status.append(el('span', { class: 'muted' }, 'Connecting…'));
@@ -471,14 +487,21 @@ export async function datasourceAdmin(app) {
         if (r.databases.includes(cur)) f.database.value = cur;
       } catch (e) { status.innerHTML = ''; status.append(el('div', { class: 'err-box' }, e.message)); }
     };
-    const discover = async () => {
-      if (!f.database.value) return toast('Select a database first', 'error');
-      status.innerHTML = ''; status.append(el('span', { class: 'muted' }, 'Scanning tables…'));
+    // quiet: only load the suggestions for the table inputs, keep the rows as they are
+    const discover = async (quiet = false) => {
+      if (!f.database.value) return quiet ? null : toast('Select a database first', 'error');
+      if (!quiet) { status.innerHTML = ''; status.append(el('span', { class: 'muted' }, 'Scanning tables…')); }
       try {
         const r = await api.adminDiscoverDatasource(conn());
+        allTables = r.tables.map(t => ({ table: t.table, kind: t.kind || 'table', ohlc: t.ohlc }));
+        fillTableList();
+        if (quiet) { renderTables(); return; }
         const ohlc = r.tables.filter(t => t.ohlc);
         const prev = Object.fromEntries(tableRows.map(x => [x.table, x]));
-        tableRows = ohlc.map(t => ({ table: t.table, tf: prev[t.table]?.tf || t.tf_guess || '', use: prev[t.table] ? prev[t.table].use : !!t.tf_guess, mapping: t.mapping }));
+        const found = new Set(ohlc.map(t => t.table));
+        tableRows = ohlc.map(t => ({ table: t.table, tf: prev[t.table]?.tf || t.tf_guess || '', use: prev[t.table] ? prev[t.table].use : !!t.tf_guess, mapping: t.mapping }))
+          // rows added by name (e.g. a view with other column names) stay
+          .concat(tableRows.filter(x => x.table && !found.has(x.table)));
         const first = ohlc.find(t => t.tf_guess) || ohlc[0];
         if (first && isNew) for (const c of COLS) if (first.mapping[c]) colInputs[c].value = first.mapping[c];
         status.innerHTML = '';
@@ -486,7 +509,7 @@ export async function datasourceAdmin(app) {
         renderTables();
       } catch (e) { status.innerHTML = ''; status.append(el('div', { class: 'err-box' }, e.message)); }
     };
-    f.database.addEventListener('change', discover);
+    f.database.addEventListener('change', () => { allTables = null; discover(); });
     body.append(
       el('div', { class: 'form-grid' },
         el('label', {}, 'Name'), f.name,
@@ -495,18 +518,22 @@ export async function datasourceAdmin(app) {
         el('label', {}, 'User'), f.user,
         el('label', {}, 'Password'), f.password,
         el('label', {}, ''), el('div', {}, el('button', { class: 'btn', 'data-testid': 'ds-test', onclick: test }, 'Test connection')),
-        el('label', {}, 'Database'), el('div', { style: { display: 'flex', gap: '6px' } }, f.database, el('button', { class: 'btn', 'data-testid': 'ds-discover', onclick: discover }, 'Scan tables')),
+        el('label', {}, 'Database'), el('div', { style: { display: 'flex', gap: '6px' } }, f.database, el('button', { class: 'btn', 'data-testid': 'ds-discover', onclick: () => discover() }, 'Scan tables')),
         el('label', {}, 'Live data'), f.live,
         el('label', {}, 'Enabled'), f.enabled),
       el('div', { style: { margin: '10px 0' } }, status),
       el('b', {}, 'Timeframe tables'),
-      el('div', { class: 'help' }, 'Pick one table per timeframe. Timeframes without a table (e.g. 30m, 2h, 1W) are aggregated inside ClickHouse from smaller ones.'),
+      el('div', { class: 'help' }, 'Pick one table or view per timeframe; names can be typed (suggestions come from the database). Timeframes without a table (e.g. 30m, 2h, 1W) are aggregated inside ClickHouse from smaller ones. All tables use the column mapping below; a view can rename columns with AS.'),
       tablesBox, colsBox,
       el('div', { style: { display: 'flex', gap: '8px', marginTop: '14px', justifyContent: 'flex-end' } },
         el('button', { class: 'btn ghost', onclick: renderList }, 'Back'),
         el('button', { class: 'btn primary', 'data-testid': 'ds-save', onclick: async () => {
           const tables = {};
-          for (const r of tableRows) if (r.use && r.tf) tables[r.tf] = r.table;
+          for (const r of tableRows) {
+            if (!r.use || !r.tf || !r.table) continue;
+            if (tables[r.tf]) return toast(`Two tables are set for ${r.tf}: ${tables[r.tf]} and ${r.table}. Pick one.`, 'error');
+            tables[r.tf] = r.table;
+          }
           const cfg = { ...conn(), name: f.name.value, prefix: f.prefix.value.toUpperCase(), live: f.live.value, enabled: f.enabled.checked, tables, columns: Object.fromEntries(COLS.map(c => [c, colInputs[c].value.trim()])) };
           try {
             await api.adminSaveDatasource(cfg);
@@ -516,6 +543,7 @@ export async function datasourceAdmin(app) {
           } catch (e) { toast(e.message, 'error'); }
         } }, 'Save')));
     renderTables();
+    if (d.id && d.database) discover(true); // table types and suggestions for an existing source
   };
   renderList();
   return m;
