@@ -13,6 +13,21 @@ Alerts are evaluated by the backend, so they keep working (and notify) while no 
 Conditions: *crossing, crossing up, crossing down, greater than, less than, entering channel,
 exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once per bar*.
 
+### Lines and channels
+
+The engine follows a drawing exactly as it is drawn on the chart:
+
+- the level of a sloped line is interpolated for every bar from its two points;
+- a **trend line** and a **parallel channel** only count between their two points, unless
+  **Extend left** (←) / **Extend right** (→) is switched on in the drawing toolbar. A **ray** extends
+  to the right, an **extended line** both ways. To catch a future breakout, extend the line right;
+- on a **log scale** a straight line on screen is straight in log(price), so the engine interpolates
+  in log(price) when the user's chart is on a log scale (a channel then keeps a constant ratio
+  between its lines). Example: a line from 100 to 200 is at 141.4 halfway on a log scale and at 150
+  on a linear scale. Switching the scale changes the line on screen and the alert level together;
+- crossing up fires when the previous close was below the line and the bar's high reaches it
+  (intrabar), crossing down the other way round; greater / less compare the close.
+
 ## Engine
 
 `backend/alerts.py` runs a thread every 20 s:

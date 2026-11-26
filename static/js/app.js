@@ -1756,7 +1756,8 @@ function renderDrawbar(d) {
     bar.append(btn({ title: 'Font size', onclick: (e) => showMenu(e.currentTarget, [10, 12, 14, 16, 20, 24, 32].map(s => ({ label: `${s}px`, active: (st.fontSize || 14) === s, onClick: () => { app.dm.updateSelected(null, { fontSize: s }); renderDrawbar(app.dm.selected()); } }))) }, `${st.fontSize || 14}`));
   }
   if (TOOLS[d.tool]?.fill || d.tool === 'polyline') bar.append(btn({ title: 'Fill', class: `db-btn ${st.fill !== false ? 'active' : ''}`, onclick: () => { app.dm.updateSelected(null, { fill: st.fill === false }); renderDrawbar(app.dm.selected()); } }, '▨'));
-  if (TOOLS[d.tool]?.extend) bar.append(btn({ title: 'Extend right', class: `db-btn ${st.extend ? 'active' : ''}`, onclick: () => { app.dm.updateSelected(null, { extend: !st.extend }); renderDrawbar(app.dm.selected()); } }, '→'));
+  if (TOOLS[d.tool]?.extendLeft) bar.append(btn({ title: 'Extend left', 'data-testid': 'db-ext-left', class: `db-btn ${st.extendLeft ? 'active' : ''}`, onclick: () => { app.dm.updateSelected(null, { extendLeft: !st.extendLeft }); renderDrawbar(app.dm.selected()); } }, '←'));
+  if (TOOLS[d.tool]?.extend) bar.append(btn({ title: 'Extend right', 'data-testid': 'db-ext-right', class: `db-btn ${st.extend ? 'active' : ''}`, onclick: () => { app.dm.updateSelected(null, { extend: !st.extend }); renderDrawbar(app.dm.selected()); } }, '→'));
   bar.append(el('div', { class: 'db-sep' }));
   if (TOOLS[d.tool]?.alert) bar.append(btn({ title: 'Add alert on this drawing', 'data-testid': 'db-alert', html: ICONS.bell.replace(/14/g, '16'), onclick: () => dialogs.alertDialog(app, { kind: 'drawing', drawing: d }) }));
   bar.append(btn({ title: d.locked ? 'Unlock' : 'Lock', html: d.locked ? ICONS.lock : ICONS.unlock, onclick: () => { app.dm.updateSelected({ locked: !d.locked }); renderDrawbar(app.dm.selected()); } }));

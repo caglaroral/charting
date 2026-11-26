@@ -15,6 +15,7 @@ The engine re-evaluates every bar whose time >= alert.last_bar, so the newest (p
 bar is checked on every pass; an alert fires at most once per bar (last_fired).
 """
 import json
+import math
 import sys
 import threading
 import time
@@ -220,15 +221,22 @@ def _indicator_types():
 
 # --------------------------------------------------------------------------- geometry
 
-def _interp(p0, p1, t):
+def _interp(p0, p1, t, log=False):
+    """Price of the line through p0 and p1 at time t. On a log scale the line on screen is straight in
+    log(price), so it is interpolated there (only when both prices are positive)."""
     if p1["t"] == p0["t"]:
         return None
-    return p0["p"] + (p1["p"] - p0["p"]) * (t - p0["t"]) / (p1["t"] - p0["t"])
+    k = (t - p0["t"]) / (p1["t"] - p0["t"])
+    if log and p0["p"] > 0 and p1["p"] > 0:
+        return math.exp(math.log(p0["p"]) + (math.log(p1["p"]) - math.log(p0["p"])) * k)
+    return p0["p"] + (p1["p"] - p0["p"]) * k
 
 
-def drawing_levels(d: dict, t: int):
-    """Return (lo, hi) for zone tools, (v, v) for line tools, or None if not defined at time t."""
+def drawing_levels(d: dict, t: int, log: bool = False):
+    """Return (lo, hi) for zone tools, (v, v) for line tools, or None if not defined at time t.
+    log: the chart is on a log scale (lines follow what is drawn on screen)."""
     tool, pts = d.get("tool"), d.get("points") or []
+    st = d.get("style") or {}
     if tool in ("hline", "crossline") and pts:
         v = pts[0]["p"]; return (v, v)
     if tool == "hray" and pts:
@@ -236,8 +244,10 @@ def drawing_levels(d: dict, t: int):
     if len(pts) < 2:
         return None
     p0, p1 = pts[0], pts[1]
+    lo_t, hi_t = min(p0["t"], p1["t"]), max(p0["t"], p1["t"])
     if tool == "trend":
-        if not (min(p0["t"], p1["t"]) <= t <= max(p0["t"], p1["t"])):
+        # "Extend left / right" of the trend line: left / right on the chart, whatever the point order
+        if (t < lo_t and not st.get("extendLeft")) or (t > hi_t and not st.get("extend")):
             return None
     elif tool == "ray":
         if (t - p0["t"]) * (p1["t"] - p0["t"]) < 0:
@@ -245,16 +255,20 @@ def drawing_levels(d: dict, t: int):
     elif tool == "rect":
         return (min(p0["p"], p1["p"]), max(p0["p"], p1["p"]))
     elif tool == "channel":
-        if len(pts) < 3 or t < min(p0["t"], p1["t"]):
+        if len(pts) < 3 or (t < lo_t and not st.get("extendLeft")) or (t > hi_t and not st.get("extend")):
             return None
-        base = _interp(p0, p1, t)
-        off = pts[2]["p"] - (_interp(p0, p1, pts[2]["t"]) or 0)
-        if base is None:
+        base = _interp(p0, p1, t, log)
+        at2 = _interp(p0, p1, pts[2]["t"], log)
+        if base is None or at2 is None:
             return None
-        return (min(base, base + off), max(base, base + off))
+        if log and base > 0 and at2 > 0 and pts[2]["p"] > 0:
+            other = base * (pts[2]["p"] / at2)  # parallel on screen = constant ratio on a log scale
+        else:
+            other = base + (pts[2]["p"] - at2)
+        return (min(base, other), max(base, other))
     elif tool != "extended":
         return None
-    v = _interp(p0, p1, t)
+    v = _interp(p0, p1, t, log)
     return None if v is None else (v, v)
 
 
@@ -312,7 +326,16 @@ def _indicator_plots(alert: dict, raw_bars: list[list]) -> dict | None:
     return jsrunner.compute(req, raw_bars)["plots"]
 
 
-def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None):
+def _user_log_scale(uid: str) -> bool:
+    """Whether the user's chart is on a log scale: lines are then followed as drawn on screen."""
+    try:
+        layout = store.get_setting(uid, "layout") or {}
+        return int(layout.get("scaleMode") or 0) == 1
+    except Exception:
+        return False
+
+
+def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None, log: bool = False):
     """Return ([(bar_time, price)], new_last_bar)."""
     if len(bars) < 2:
         return [], alert["last_bar"]
@@ -355,7 +378,7 @@ def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None):
             d = drawings.get(spec.get("drawing_id"))
             if d is None:
                 return None, bars[-1]["time"]  # drawing deleted -> caller deactivates
-            level = lambda i: drawing_levels(d, bars[i]["time"])
+            level = lambda i: drawing_levels(d, bars[i]["time"], log)
 
     fired = []
     for i in range(start, len(bars)):
@@ -435,14 +458,16 @@ def run_once() -> int:
             continue
         bars = _bars_dicts(raw)
 
-        drawings = {}
+        drawings, log_scale = {}, {}
         for a in group:
             if a["kind"] == "drawing" and a["user_id"] not in drawings:
                 drawings[a["user_id"]] = {d["id"]: d for d in store.list_drawings(a["user_id"], symbol)}
+                log_scale[a["user_id"]] = _user_log_scale(a["user_id"])
 
         for a in group:
             try:
-                fired, new_last = _evaluate(a, bars, drawings.get(a["user_id"], {}), raw)
+                fired, new_last = _evaluate(a, bars, drawings.get(a["user_id"], {}), raw,
+                                            log=log_scale.get(a["user_id"], False))
             except Exception:
                 traceback.print_exc()
                 continue

@@ -243,7 +243,11 @@ for (const [id, name] of [['cross', 'Cross'], ['dot', 'Dot'], ['arrowcursor', 'A
 }
 
 // ---- trend line tools
-def('trend', 'Trend Line', 'lines', 2, (G, P) => G.line(P[0], P[1]), { alert: true, key: 'Alt+T' });
+def('trend', 'Trend Line', 'lines', 2, (G, P) => {
+  // extend left / right as seen on the chart, whichever point was placed first
+  const [l, r] = P[0][0] <= P[1][0] ? [P[0], P[1]] : [P[1], P[0]];
+  G.line(...G.ext(l, r, !!G.st.extendLeft, !!G.st.extend));
+}, { alert: true, extend: true, extendLeft: true, key: 'Alt+T' });
 def('ray', 'Ray', 'lines', 2, (G, P) => G.line(...G.ext(P[0], P[1], false, true)), { alert: true });
 def('infoline', 'Info Line', 'lines', 2, (G, P, d) => {
   G.line(P[0], P[1]);
@@ -273,12 +277,15 @@ function channelDy(P) {
 }
 def('channel', 'Parallel Channel', 'lines', 3, (G, P, d) => {
   const dy = channelDy(P);
-  const a2 = [P[0][0], P[0][1] + dy], b2 = [P[1][0], P[1][1] + dy];
-  if (G.st.fill !== false) G.poly([P[0], P[1], b2, a2], { stroke: false });
-  G.line(P[0], P[1]); G.line(a2, b2);
-  G.line([P[0][0], P[0][1] + dy / 2], [P[1][0], P[1][1] + dy / 2], { dash: 1, alpha: 0.6, nohit: true });
+  // extend left / right as seen on the chart
+  const [l, r] = P[0][0] <= P[1][0] ? [P[0], P[1]] : [P[1], P[0]];
+  const [a, b] = G.ext(l, r, !!G.st.extendLeft, !!G.st.extend);
+  const off = (p, k) => [p[0], p[1] + dy * k];
+  if (G.st.fill !== false) G.poly([a, b, off(b, 1), off(a, 1)], { stroke: false });
+  G.line(a, b); G.line(off(a, 1), off(b, 1));
+  G.line(off(a, 0.5), off(b, 0.5), { dash: 1, alpha: 0.6, nohit: true });
   d._dy = dy;
-}, { alert: true, fill: true, handles: (P, d) => [P[0], P[1], [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 + (d._dy || 0)]] });
+}, { alert: true, fill: true, extend: true, extendLeft: true, handles: (P, d) => [P[0], P[1], [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 + (d._dy || 0)]] });
 def('regression', 'Regression Trend', 'lines', 2, (G, P, d) => {
   const bars = G.bars();
   let i0 = Math.round(G.idx(d.points[0].t)), i1 = Math.round(G.idx(d.points[1].t));

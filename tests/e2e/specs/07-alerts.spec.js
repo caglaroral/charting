@@ -128,3 +128,36 @@ test('TC-ALERT-06 alert history: lifecycle, trigger, per-channel delivery result
   await page.evaluate((a) => fetch('/api/alerts/' + a, { method: 'DELETE' }), id);
   await expect.poll(events).toContain('deleted');
 });
+
+test('TC-ALERT-07 trend line alert follows the line as drawn: extended right, on a log scale', async ({ page }) => {
+  await resetLayout(page);
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.view.length > 120);
+  await page.click('#sb-log'); // log scale, saved in the layout the engine reads
+  await page.waitForTimeout(1300);
+  // A rising line that ends 50 bars ago. At the last bar (twice the distance from the first point):
+  //   straight in price (linear scale)  0.1c -> 0.4c -> 0.7c   (below the close c)
+  //   straight in log(price) (log)      0.1c -> 0.4c -> 1.6c   (above the close c)
+  // so "close less than the line" fires only if the engine extends the line and follows the log scale.
+  const id = await page.evaluate(() => {
+    const v = __app.S.view, n = v.length, c = v[n - 1].close, sec = v[n - 1].time - v[n - 2].time;
+    const tN = v[n - 1].time;
+    const d = { id: 'e2e-trend-' + Date.now(), tool: 'trend', style: {}, z: 999,
+      points: [{ t: tN - 100 * sec, p: 0.1 * c }, { t: tN - 50 * sec, p: 0.4 * c }] };
+    __app.dm.drawings.push(d);
+    __app.dm.select(d.id);
+    __app.dm.commit();
+    return d.id;
+  });
+  await page.click('[data-testid=db-ext-right]');
+  expect(await page.evaluate((id) => __app.dm.drawings.find(d => d.id === id).style.extend, id)).toBe(true);
+  await expect(page.locator('[data-testid=db-ext-right]')).toHaveClass(/active/);
+  await page.click('[data-testid=db-alert]');
+  await page.selectOption('[data-testid=alert-cond]', 'less');
+  await page.click('[data-testid=alert-save]');
+  await page.waitForFunction(() => __app.S.alerts.some(a => a.kind === 'drawing'));
+  await page.waitForTimeout(500); // drawing saved (debounced)
+  await expect.poll(async () => page.evaluate(async () => (await (await fetch('/api/alerts/events?since=0')).json()).events.length), { timeout: 70_000, intervals: [3000] }).toBeGreaterThan(0);
+  await page.evaluate(() => __app.dm.removeAll());
+  await resetLayout(page);
+});
