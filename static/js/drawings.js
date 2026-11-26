@@ -54,6 +54,9 @@ const STYLE_BY_TOOL = {
   forecast: { color: '#2962ff', width: 2 }, ghostfeed: { color: '#787b86', width: 1 }, barspattern: { color: '#2962ff', width: 1 },
   ruler: { color: '#2962ff', width: 1 }, zoom: { color: '#2962ff', width: 1 },
 };
+// Changing one of these on a drawing makes it the default of that tool for new drawings (per user,
+// saved in the "drawingStyles" setting) until it is changed again.
+export const REMEMBERED_STYLE = ['color', 'width', 'dash', 'fontSize', 'fill'];
 const defaultStyle = (tool) => ({ ...DEFAULT_STYLE, ...(STYLE_BY_GROUP[TOOLS[tool]?.group] || {}), ...(STYLE_BY_TOOL[tool] || {}) });
 
 // ============================================================================ geometry helpers
@@ -848,6 +851,7 @@ export class DrawingManager {
   constructor(host) {
     this.h = host;
     this.drawings = [];
+    this.toolStyles = {};
     this.tool = 'cursor';
     this.cursorMode = 'cross';
     this.selectedId = null;
@@ -931,8 +935,25 @@ export class DrawingManager {
     if (!d) return;
     this.checkpoint();
     Object.assign(d, patch || {});
-    if (stylePatch) d.style = { ...d.style, ...stylePatch };
+    if (stylePatch) {
+      d.style = { ...d.style, ...stylePatch };
+      const keep = Object.fromEntries(Object.entries(stylePatch).filter(([k]) => REMEMBERED_STYLE.includes(k)));
+      if (Object.keys(keep).length) {
+        this.toolStyles = { ...this.toolStyles, [d.tool]: { ...this.toolStyles[d.tool], ...keep } };
+        this.h.onToolStyles?.(this.toolStyles);
+      }
+    }
     this.commit();
+  }
+
+  // The user's remembered style per tool ({tool: {color, width, ...}}), applied to new drawings.
+  setToolStyles(map) {
+    this.toolStyles = map && typeof map === 'object' ? map : {};
+  }
+
+  styleFor(tool) {
+    const saved = this.toolStyles?.[tool] || {};
+    return { ...defaultStyle(tool), ...Object.fromEntries(Object.entries(saved).filter(([k]) => REMEMBERED_STYLE.includes(k))) };
   }
 
   removeSelected() {
@@ -1227,7 +1248,7 @@ export class DrawingManager {
   _nextZ() { return this.drawings.reduce((m, d) => Math.max(m, d.z || 0), 0) + 1; }
 
   _newDrawing(tool, pt) {
-    const d = { id: uid(), tool, points: [], style: defaultStyle(tool), z: this._nextZ() };
+    const d = { id: uid(), tool, points: [], style: this.styleFor(tool), z: this._nextZ() };
     const sec = this.h.tfSec();
     const def = TOOLS[tool];
     if (def.pts === 'pos') {

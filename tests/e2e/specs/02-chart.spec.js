@@ -152,3 +152,32 @@ test('TC-CHART-10 "Scroll to the most recent bar" appears when scrolled back and
   await page.keyboard.press('Alt+Shift+ArrowRight');
   await page.waitForFunction(() => __app.chart.timeScale().getVisibleLogicalRange().to >= __app.S.view.length - 1);
 });
+
+test('TC-CHART-11 changing the timeframe keeps the date on screen (history is loaded as needed)', async ({ page }) => {
+  await resetLayout(page);
+  const center = () => page.evaluate(() => {
+    const r = __app.chart.timeScale().getVisibleLogicalRange();
+    const i = Math.round((r.from + r.to) / 2);
+    return { t: __app.S.view[i].time - __app.S.tzOffset, w: Math.round(r.to - r.from) };
+  });
+  const target = Date.UTC(2026, 8, 20, 12) / 1000; // 2026-09-20 12:00 UTC, ClickHouse history
+  await page.evaluate(() => __app.setTf('1D'));
+  await page.waitForFunction(() => __app.S.tf === '1D' && __app.S.view.length > 100);
+  await page.evaluate((t) => {
+    const i = __app.S.view.findIndex(b => b.time - __app.S.tzOffset >= t);
+    __app.chart.timeScale().setVisibleLogicalRange({ from: i - 40, to: i + 40 });
+  }, target);
+  const d = await center();
+  expect(Math.abs(d.t - target)).toBeLessThanOrEqual(86400);
+  for (const [tf, sec] of [['4h', 14400], ['15m', 900]]) {
+    await page.evaluate((x) => __app.setTf(x), tf);
+    expect(await page.evaluate(() => __app.S.view[1].time - __app.S.view[0].time)).toBe(sec);
+    await expect.poll(async () => { const c = await center(); return Math.abs(c.t - d.t) <= 86400 && c.w === 80; }, { timeout: 30_000 }).toBe(true);
+  }
+  // at the latest bar the chart stays at the latest bar
+  await page.evaluate(() => { const n = __app.S.view.length; __app.chart.timeScale().setVisibleLogicalRange({ from: n - 60, to: n + 5 }); });
+  await page.evaluate(() => __app.setTf('1h'));
+  await page.waitForFunction(() => __app.S.tf === '1h');
+  await expect.poll(() => page.evaluate(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return Math.round(r.to - (__app.S.view.length - 1)); })).toBe(6);
+  await resetLayout(page);
+});

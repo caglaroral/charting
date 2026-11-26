@@ -122,3 +122,34 @@ test('TC-DRAW-04 eraser cursor deletes, measure tool is temporary, zoom changes 
   // the range is applied by the chart asynchronously
   await expect.poll(() => page.evaluate(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return r.to - r.from; })).toBeLessThan(before.to - before.from);
 });
+
+test('TC-DRAW-05 a changed color / width becomes the tool default for new drawings, also after reload', async ({ page }) => {
+  await page.evaluate(() => fetch('/api/settings/drawingStyles', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: {} }) }));
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.dm);
+  await pickTool(page, 'lines', 'trend');
+  await drawWithClicks(page, 2);
+  await expect(page.locator('#drawbar')).toBeVisible();
+  await page.click('[data-testid=db-color]');
+  await page.locator('.swatches .swatch').nth(2).click();
+  await page.click('[data-testid=db-width]');
+  await page.locator('.dd-menu .dd-item', { hasText: '3px' }).click();
+  expect(await page.evaluate(() => __app.dm.selected().style)).toMatchObject({ color: '#f23645', width: 3 });
+  // a new trend line uses it right away; other tools keep their own defaults
+  await pickTool(page, 'lines', 'trend');
+  await drawWithClicks(page, 2);
+  expect(await page.evaluate(() => __app.dm.drawings.at(-1).style)).toMatchObject({ color: '#f23645', width: 3 });
+  // ... and after a reload (saved per user)
+  await page.waitForTimeout(800);
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.dm && __app.dm.drawings.length === 2, null, { timeout: 30_000 });
+  await clearDrawings(page);
+  await pickTool(page, 'lines', 'trend');
+  await drawWithClicks(page, 2);
+  expect(await page.evaluate(() => __app.dm.drawings.at(-1).style)).toMatchObject({ color: '#f23645', width: 3 });
+  await pickTool(page, 'lines', 'hline');
+  await drawWithClicks(page, 1);
+  expect(await page.evaluate(() => __app.dm.drawings.at(-1).style.color)).not.toBe('#f23645');
+  await clearDrawings(page);
+  await page.evaluate(() => fetch('/api/settings/drawingStyles', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: {} }) }));
+});

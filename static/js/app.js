@@ -112,6 +112,7 @@ const S = app.S;
 
 app.fmtPrice = (p) => (p == null || Number.isNaN(p) ? '—' : Number(p).toFixed(S.priceDecimals));
 app.tfSec = () => TF_SEC[S.tf];
+app.TF_SEC = TF_SEC; app.TF_NAME = TF_NAME;
 app.symbolName = (key) => (key || '').split(':').pop();
 app.symbolSource = (key) => ((key || '').includes(':') ? key.split(':')[0] : '');
 
@@ -152,18 +153,20 @@ async function showLogin() {
 }
 
 function showFatal(e) {
-  document.body.append(el('div', { class: 'chart-msg', style: { position: 'fixed' } }, 'Hata: ' + e.message));
+  document.body.append(el('div', { class: 'chart-msg', style: { position: 'fixed' } }, 'Error: ' + e.message));
 }
 
 async function start() {
   $('#app').hidden = false;
-  const [syms, layoutRes, scripts] = await Promise.all([
+  const [syms, layoutRes, scripts, toolStyles] = await Promise.all([
     api.symbols(), api.getSetting('layout').catch(() => ({ value: null })), api.scripts().catch(() => ({ scripts: [] })),
+    api.getSetting('drawingStyles').catch(() => ({ value: null })),
   ]);
   S.symbols = syms.symbols;
   S.sources = Object.fromEntries((syms.sources || []).map(x => [x.prefix, x]));
   S.symMap = new Map(S.symbols.map(s => [s.symbol, s]));
   S.scripts = scripts.scripts;
+  S.toolStyles = toolStyles.value || {};
   api.notify().then(n => { S.notifyDefaults = n.default_channels; }).catch(() => {});
   const L = layoutRes.value || {};
   Object.assign(S, {
@@ -236,6 +239,7 @@ function createChart() {
     fmtPrice: (p) => app.fmtPrice(p), fmtTime: (t) => fmtTime(t, TF_SEC[S.tf] < 86400),
     magnet: () => S.magnet, keepDrawing: () => S.keepDrawing,
     onSelect: (d) => renderDrawbar(d), onToolChange: () => renderLeftActive(),
+    onToolStyles: (map) => api.setSetting('drawingStyles', map).catch(e => toast('Failed to save the drawing style: ' + e.message, 'error')),
     editText: async (d) => {
       const t = await dialogs.promptText('Text', d.text || '');
       if (t != null) app.dm.updateSelected({ text: t });
@@ -243,6 +247,7 @@ function createChart() {
     toast,
     onZoom: (l0, l1) => { S.autoScale = true; applyScaleMode(); app.chart.timeScale().setVisibleLogicalRange({ from: l0, to: l1 }); },
   });
+  app.dm.setToolStyles(S.toolStyles);
   makeMainSeries();
   if (S.cursorMode && S.cursorMode !== 'cross') app.dm.setTool(S.cursorMode);
   let lgFrame = 0;
@@ -564,7 +569,7 @@ function lineBreakBars(bars, n = 3) {
 const toBar = (r) => ({ time: r[0] + S.tzOffset, open: r[1], high: r[2], low: r[3], close: r[4], volume: r[5] });
 
 let loadToken = 0;
-export async function setSymbol(symbol, { initial = false, tf = null, range = null } = {}) {
+export async function setSymbol(symbol, { initial = false, tf = null, range = null, anchor = null } = {}) {
   if (!symbol) return;
   const token = ++loadToken;
   S.symbol = symbol;
@@ -599,7 +604,9 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     showMsg(S.bars.length ? '' : 'No data for this symbol/timeframe');
     const n = S.view.length;
     if (range) applyRange(range);
+    else if (anchor) await applyAnchor(anchor, token);
     else app.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n + 10 });
+    if (token !== loadToken) return;
     await refreshIndicators(true);
     if (token !== loadToken) return;
     updateLegendValues(null);
@@ -617,8 +624,47 @@ app.setSymbol = setSymbol;
 
 export async function setTf(tf) {
   if (!TF_SEC[tf] || tf === S.tf) return;
+  const anchor = viewAnchor();
   S.tf = tf;
-  await setSymbol(S.symbol);
+  await setSymbol(S.symbol, { anchor });
+}
+
+// What the chart shows, independent of the timeframe: the date in the middle of the screen (null when
+// the latest bar is on screen, then the chart stays at the latest bar), how many bars fit on the screen
+// and the space right of the latest bar.
+function viewAnchor() {
+  const r = app.chart.timeScale().getVisibleLogicalRange(), n = S.view.length;
+  if (!r || !n) return null;
+  const width = r.to - r.from;
+  if (r.to >= n - 1) return { time: null, width, offset: r.to - (n - 1) };
+  const i = Math.max(0, Math.min(n - 1, Math.round((r.from + r.to) / 2)));
+  return { time: S.view[i].time, width };
+}
+
+const MAX_ANCHOR_LOADS = 12;
+
+// After a timeframe change: show the same date in the middle, with the same number of bars on screen.
+// Older dates first need their history loaded (the chart starts with the latest bars).
+async function applyAnchor({ time, width, offset }, token) {
+  const ts = app.chart.timeScale();
+  if (time == null) {
+    const n = S.view.length;
+    ts.setVisibleLogicalRange({ from: n - 1 + offset - width, to: n - 1 + offset });
+    return;
+  }
+  const want = time - (width / 2) * TF_SEC[S.tf];
+  for (let k = 0; k < MAX_ANCHOR_LOADS && S.view.length && S.view[0].time > want && !S.exhausted; k++) {
+    const first = S.bars[0]?.time;
+    await loadMore({ refresh: false });
+    if (token !== loadToken || S.bars[0]?.time === first) break;
+  }
+  if (token !== loadToken || !S.view.length) return;
+  // the bar that contains the date: the last bar starting at or before it
+  let lo = 0, hi = S.view.length - 1;
+  if (S.view[0].time > time) hi = 0;
+  else while (lo < hi) { const m = (lo + hi + 1) >> 1; if (S.view[m].time <= time) lo = m; else hi = m - 1; }
+  const i = hi;
+  ts.setVisibleLogicalRange({ from: i - width / 2, to: i + width / 2 });
 }
 app.setTf = setTf;
 
@@ -638,8 +684,19 @@ function refreshAfterScroll() {
 }
 app.indicatorsPending = () => !!scrollRefresh;
 
-async function loadMore() {
-  if (loadingMore || S.exhausted || !S.bars.length) return;
+// One history load at a time; a caller that comes while one runs waits for it.
+let morePromise = null, moreToken = 0;
+function loadMore(opts) {
+  if (morePromise && moreToken !== loadToken) return morePromise.then(() => loadMore(opts)); // previous symbol / timeframe
+  if (!morePromise) {
+    moreToken = loadToken;
+    morePromise = loadMoreNow(opts).finally(() => { morePromise = null; });
+  }
+  return morePromise;
+}
+
+async function loadMoreNow({ refresh = true } = {}) {
+  if (S.exhausted || !S.bars.length) return;
   loadingMore = true;
   const token = loadToken;
   try {
@@ -669,7 +726,7 @@ async function loadMore() {
     const added = S.view.length - before;
     if (r) ts.setVisibleLogicalRange({ from: r.from + added, to: r.to + added });
     app.dm.update();
-    refreshAfterScroll(); // indicators follow once the user stops scrolling (results stay aligned meanwhile)
+    if (refresh) refreshAfterScroll(); // indicators follow once the user stops scrolling (results stay aligned meanwhile)
   } catch (e) {
     toast('Failed to load history: ' + e.message, 'error');
   } finally {
@@ -806,7 +863,7 @@ async function computeIndicator(inst) {
       const c1 = col[pl.k], c2 = col[pl.k + '_2'] || c1;
       colors = inst.type === 'volume' ? vals._up.map(u => (u ? c1 : c2)) : data.map(v => (v == null ? null : v >= 0 ? c1 : c2));
     }
-    return { k: pl.k, title: pl.l, color: col[pl.k], colors, width: pl.w || 1, style: pl.kind === 'histogram' ? 'histogram' : pl.dots ? 'circles' : 'line', data };
+    return { k: pl.k, title: pl.l, color: col[pl.k], colors, width: pl.w || 1, style: pl.kind === 'histogram' ? 'columns' : pl.dots ? 'circles' : 'line', data };
   });
   return { name: indLabel({ ...inst, params: p }), overlay: def.overlay, volume: !!def.volume, plots, hlines: (def.levels || []).map(v => ({ value: v, color: '#787b86' })), shapes: [] };
 }
@@ -1109,6 +1166,38 @@ function shapePrimitive(it, series, overlay) {
 // Draws ChartScript fill() areas between two series below the indicator lines.
 // Columns are snapped to whole device pixels so neighbouring bars never overlap (no seams);
 // runs of one solid color are drawn as a single polygon, gradient fills column by column.
+// Pine's plot.style_histogram: a bar of `linewidth` pixels from 0 to the value, whatever the bar
+// spacing (LWC's HistogramSeries fills the whole bar spacing, which is Pine's style_columns).
+class PineHistogram {
+  constructor() { this._data = null; this._opt = null; }
+  renderer() { return this; }
+  update(data, options) { this._data = data; this._opt = options; }
+  priceValueBuilder(row) { return [0, row.value]; }
+  isWhitespace(row) { return row.value == null; }
+  defaultOptions() { return { color: '#2962ff', barWidth: 1 }; }
+  destroy() {}
+  draw(target, priceToCoordinate) {
+    const d = this._data, o = this._opt;
+    if (!d || !d.visibleRange) return;
+    target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      // at most the bar spacing minus a 1px gap, at least 1px
+      const w = Math.max(1, Math.round(Math.min(o.barWidth, d.barSpacing - 1) * hr));
+      const y0 = priceToCoordinate(0);
+      if (y0 == null) return;
+      const by0 = Math.round(y0 * vr);
+      for (let i = d.visibleRange.from; i < d.visibleRange.to; i++) {
+        const b = d.bars[i], v = b.originalData.value;
+        if (v == null) continue;
+        const y = priceToCoordinate(v);
+        if (y == null) continue;
+        const by = Math.round(y * vr), x = Math.round(b.x * hr) - Math.floor(w / 2);
+        ctx.fillStyle = b.originalData.color || o.color;
+        ctx.fillRect(x, Math.min(by, by0), w, Math.max(1, Math.abs(by - by0)));
+      }
+    });
+  }
+}
+
 function fillPrimitive(it, series) {
   let req = null;
   const prim = {
@@ -1227,7 +1316,8 @@ function rebuildIndicatorSeries(items) {
       let s;
       p.mode = plotMode(p);
       if (p.mode === 'const') common.autoscaleInfoProvider = constScale(p);
-      if (p.style === 'histogram' || p.style === 'columns') s = c.addSeries(LWC.HistogramSeries, { ...common, color: p.color, base: 0 }, pane);
+      if (p.style === 'histogram') s = c.addCustomSeries(new PineHistogram(), { ...common, color: p.color, barWidth: Math.max(1, p.width || 1) }, pane);
+      else if (p.style === 'columns') s = c.addSeries(LWC.HistogramSeries, { ...common, color: p.color, base: 0 }, pane);
       // Pine area plots fill to zero with one flat color (histbase 0), not to the pane bottom
       else if (p.style === 'area') s = c.addSeries(LWC.BaselineSeries, { ...common, baseValue: { type: 'price', price: 0 }, topLineColor: p.color, bottomLineColor: p.color, topFillColor1: p.color, topFillColor2: p.color, bottomFillColor1: p.color, bottomFillColor2: p.color, lineWidth: p.width }, pane);
       else if (p.style === 'circles' || p.style === 'cross' || p.style === 'dots') s = c.addSeries(LWC.LineSeries, { ...common, color: p.color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: Math.max(1.5, p.width), lastValueVisible: false }, pane);
@@ -1749,8 +1839,8 @@ function renderDrawbar(d) {
     showMenu(e.currentTarget, [{ el: sw }, { el: el('div', { class: 'dd-item' }, 'Custom color', custom) }]);
   } }, el('span', { class: 'swatch', style: { background: st.color || '#2962ff' } })));
   if (!TOOLS[d.tool]?.textEdit) {
-    bar.append(btn({ title: 'Width', onclick: (e) => showMenu(e.currentTarget, [1, 2, 3, 4].map(w => ({ label: `${w}px`, active: (st.width || 1) === w, onClick: () => app.dm.updateSelected(null, { width: w }) }))) }, `${st.width || 1}px`));
-    bar.append(btn({ title: 'Line style', onclick: (e) => showMenu(e.currentTarget, [['Solid', 0], ['Dashed', 1], ['Dotted', 2]].map(([l, v]) => ({ label: l, active: (st.dash || 0) === v, onClick: () => app.dm.updateSelected(null, { dash: v }) }))) }, ['━', '┅', '┈'][st.dash || 0]));
+    bar.append(btn({ title: 'Width', 'data-testid': 'db-width', onclick: (e) => showMenu(e.currentTarget, [1, 2, 3, 4].map(w => ({ label: `${w}px`, active: (st.width || 1) === w, onClick: () => { app.dm.updateSelected(null, { width: w }); renderDrawbar(app.dm.selected()); } }))) }, `${st.width || 1}px`));
+    bar.append(btn({ title: 'Line style', onclick: (e) => showMenu(e.currentTarget, [['Solid', 0], ['Dashed', 1], ['Dotted', 2]].map(([l, v]) => ({ label: l, active: (st.dash || 0) === v, onClick: () => { app.dm.updateSelected(null, { dash: v }); renderDrawbar(app.dm.selected()); } }))) }, ['━', '┅', '┈'][st.dash || 0]));
   } else {
     bar.append(btn({ title: 'Edit text', html: ICONS.text, onclick: async () => { const t = await dialogs.promptText('Text', d.text || ''); if (t != null) app.dm.updateSelected({ text: t }); } }));
     bar.append(btn({ title: 'Font size', onclick: (e) => showMenu(e.currentTarget, [10, 12, 14, 16, 20, 24, 32].map(s => ({ label: `${s}px`, active: (st.fontSize || 14) === s, onClick: () => { app.dm.updateSelected(null, { fontSize: s }); renderDrawbar(app.dm.selected()); } }))) }, `${st.fontSize || 14}`));

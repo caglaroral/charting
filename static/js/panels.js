@@ -7,7 +7,8 @@ import * as dialogs from './dialogs.js';
 let app, S;
 const COND_TR = {
   crossing: 'crossing', crossing_up: 'crossing up', crossing_down: 'crossing down', greater: 'greater than',
-  less: 'less than', entering: 'entering channel', exiting: 'exiting channel', signal: 'signal',
+  less: 'less than', closed_above: 'closed above', closed_below: 'closed below', entering: 'entering channel',
+  exiting: 'exiting channel', signal: 'signal',
 };
 export const condText = (c) => COND_TR[c] || c;
 
@@ -287,8 +288,8 @@ async function loadAlerts() {
 
 export function alertSummary(a) {
   const sp = a.spec || {};
-  if (a.kind === 'price') return `Price ${condText(a.cond)} ${sp.price}`;
-  if (a.kind === 'drawing') return `Drawing (${sp.tool || '?'}) ${condText(a.cond)}`;
+  if (a.kind === 'price') return `Price ${condText(a.cond)} ${sp.price} (${a.tf})`;
+  if (a.kind === 'drawing') return `Drawing (${sp.tool || '?'}) ${condText(a.cond)} (${a.tf})`;
   const tgt = sp.target || {};
   const rhs = a.cond === 'signal' ? '' : tgt.type === 'plot' ? tgt.plot : tgt.value;
   return `${sp.name || sp.type} · ${sp.plot} ${condText(a.cond)} ${rhs ?? ''} (${a.tf})`;

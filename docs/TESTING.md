@@ -16,6 +16,12 @@ E2E_BASE_URL=http://host:8080 …          # another instance (default http://lo
 npx playwright show-report               # HTML report, traces and screenshots of failures
 ```
 
+Backend unit tests (line alert geometry: bar index across data gaps, log scale, extend), no server needed:
+
+```bash
+python3 -m unittest tests/backend/test_alert_geometry.py
+```
+
 ## Test cases
 
 | ID | Area | Scenario | Expected result |
@@ -36,7 +42,9 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-IND-06 | Legend | Hover an indicator legend row during live updates | Row is not re-created, buttons stay visible |
 | TC-IND-07 | Pane scale | A / L on an indicator pane; L on the price pane | Pane scale independent of the price pane, persisted |
 | TC-SCRIPT-06 | Editor docs | Docs button in the editor header | Reference opens in a new tab, editor keeps full width |
+| TC-SCRIPT-07 | plotshape | Diamonds at location top / bottom, then scroll | Shapes at the pane top / bottom edge, they stay there while scrolling |
 | TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
+| TC-CHART-11 | Navigation | Center 20 Sep on 1D, switch to 4h and 15m; then at the latest bar switch to 1h | Same date in the middle, same number of bars on screen (history loaded as needed); at the latest bar the chart stays there |
 | TC-IND-08 | History | Load older bars with an indicator on the chart | Results stay aligned with their bars, legend unchanged |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
@@ -46,6 +54,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-DRAW-02 | Drawings | Trend line: restyle, reload, select on the line, Delete, Ctrl+Z, Ctrl+Y | Style persisted, delete/undo/redo work |
 | TC-DRAW-03 | Drawings | Switch timeframe and symbol | Drawings shared across timeframes, separate per symbol |
 | TC-DRAW-04 | Cursors | Eraser, Measure, Zoom | Eraser deletes; measure is temporary; zoom narrows the range |
+| TC-DRAW-05 | Defaults | Change a trend line's color and width, draw again, reload, draw again | New trend lines use the changed color / width (saved per user); other tools keep their defaults |
 | TC-IND-01 | Indicators | Add every built-in (admin, unlimited plan) | All compute non-empty plots, panes created, no errors |
 | TC-IND-02 | Indicators | Add RSI from picker, change length, hide, remove | Legend shows `RSI 21`, visibility toggles, pane removed |
 | TC-IND-03 | Panes | Move up/down (also above the price pane), collapse, reload, expand, maximize/restore, delete | Order and collapse persist, price legend follows its pane |
@@ -54,7 +63,7 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-SCRIPT-01 | ChartScript | New script from template, Run, Save & add | Run summary, indicator on chart with inputs in legend |
 | TC-SCRIPT-02 | ChartScript | Reference error on line 3 | Error box with message and `line 3` |
 | TC-SCRIPT-03 | Sandbox | Infinite loop; probe `document`/`parent`; `fetch` | Timeout without freezing the page; no DOM access; network blocked |
-| TC-SCRIPT-04 | Pine port | SqueezeWt | Own pane, 13 plots, 2 signals, legend identical to TradingView |
+| TC-SCRIPT-04 | Pine port | SqueezeWt | Own pane, 13 plots, 2 signals, legend identical to TradingView, histogram drawn with 4px bars like Pine |
 | TC-SCRIPT-05 | Pine port | ALL SMAs (4H `security()`, `fill()`) | Overlay, 4H MA populated, gradient fill present |
 | TC-ALERT-01 | Alerts | Price alert from toolbar, toggle, delete | Listed, alert line on chart, paused, deleted |
 | TC-ALERT-02 | Alerts | Alert on a horizontal line | Drawing alert stored, bell marker on the drawing |
@@ -62,6 +71,8 @@ npx playwright show-report               # HTML report, traces and screenshots o
 | TC-ALERT-04 | Plans | Free user: 6 alerts, e-mail channel | 6th → 402; e-mail refused and disabled in the dialog |
 | TC-ALERT-05 | Notifications | Save e-mail/webhook, invalid webhook | Persisted; invalid URL → 400 |
 | TC-ALERT-06 | History | Price alert with a failing webhook fires | Log has created, triggered, delivered (in-app), failed (webhook, with error), stopped, deleted; tab and dialog filters show it |
+| TC-ALERT-07 | Lines | Trend line extended right, chart on log scale, "less than" alert | The server fires: the level is computed in log price and beyond the line's points (linear or not extended would not fire) |
+| TC-ALERT-08 | Timeframe | Open the alert dialog; closed above on "Chart", closed below on 4h; edit | List starts with "Chart (1 hour)" (default) and has the symbol's timeframes; alerts saved with 1h / 4h; editing shows the alert's timeframe |
 | TC-ADMIN-01 | Data sources | Edit source, Test connection, Scan tables | Connected, OHLC tables listed |
 | TC-ADMIN-02 | Admin | Plans and Users dialogs; non-admin menu | Limits shown, plan assigned, no admin menu for users |
 | TC-PERSIST-01 | Workspace | Change symbol, timeframe, chart type, indicators, draw; logout/login | Everything restored |

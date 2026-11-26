@@ -223,7 +223,8 @@ plot(hist, { title: 'Hist', style: 'histogram', color: i =&gt; hist[i] &gt;= 0 ?
   <tr><th>style</th><th>Pine</th><th>Drawn as</th></tr>
   <tr><td><code>line</code></td><td><code>plot.style_line</code>, <code>style_linebr</code></td><td>line; <code>null</code> values break it</td></tr>
   <tr><td><code>stepline</code></td><td><code>plot.style_stepline</code></td><td>step line</td></tr>
-  <tr><td><code>histogram</code> / <code>columns</code></td><td><code>plot.style_histogram</code>, <code>style_columns</code></td><td>bars from zero</td></tr>
+  <tr><td><code>histogram</code></td><td><code>plot.style_histogram</code></td><td>bars from zero, <code>width</code> pixels wide</td></tr>
+  <tr><td><code>columns</code></td><td><code>plot.style_columns</code></td><td>bars from zero, as wide as the bar spacing</td></tr>
   <tr><td><code>area</code></td><td><code>plot.style_area</code></td><td>filled to zero with one flat color</td></tr>
   <tr><td><code>circles</code> / <code>cross</code></td><td><code>plot.style_circles</code>, <code>style_cross</code></td><td>dots only</td></tr>
 </table></div>

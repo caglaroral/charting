@@ -10,14 +10,28 @@ Alerts are evaluated by the backend, so they keep working (and notify) while no 
 | Drawing | trend line, ray, extended line, horizontal line/ray, cross line, rectangle, parallel channel — the alert reads the drawing's **current** geometry, so moving the drawing moves the alert | 🔔 in the drawing toolbar |
 | Indicator | any plot of a built-in or custom indicator vs. a value or another plot; or a custom `plotshape()` signal | `…` → *Add alert…* on the indicator legend |
 
-Conditions: *crossing, crossing up, crossing down, greater than, less than, entering channel,
-exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once per bar*.
+Conditions: *crossing, crossing up, crossing down, greater than, less than, closed above, closed below,
+entering channel, exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once per bar*.
+
+**Timeframe**: every alert is evaluated on bars of its own timeframe. The dialog starts with
+*Chart (…)*, the chart's current timeframe (the default), followed by the timeframes the symbol has.
+The timeframe is stored with the alert, so changing the chart later does not change the alert.
+
+- *crossing / greater / less* also check the bar that is still forming (they fire within the bar);
+- *closed above / closed below* only check bars that have **closed**: the close of a finished bar
+  above the level (above the upper line of a zone) / below it (below the lower line). With
+  *once per bar* they fire on every such closed bar.
 
 ### Lines and channels
 
 The engine follows a drawing exactly as it is drawn on the chart:
 
-- the level of a sloped line is interpolated for every bar from its two points;
+- the level of a sloped line is interpolated for every bar from its two points, **by bar position,
+  not by time**: the chart lays bars out side by side, so a gap in the data (missing bars) takes no
+  room on screen and a line drawn across it is straight in bars. The engine maps times to bar positions
+  over the same data the chart shows on the user's timeframe (saved layout): the exchange's latest 500
+  bars plus the ClickHouse history before them. This map is refreshed every 5 minutes; after its last
+  bar it moves one bar per timeframe step, like the chart. Without gaps both ways give the same level;
 - a **trend line** and a **parallel channel** only count between their two points, unless
   **Extend left** (←) / **Extend right** (→) is switched on in the drawing toolbar. A **ray** extends
   to the right, an **extended line** both ways. To catch a future breakout, extend the line right;
@@ -33,8 +47,8 @@ The engine follows a drawing exactly as it is drawn on the chart:
 `backend/alerts.py` runs a thread every 20 s:
 
 1. Loads active alerts and applies plan limits (max active alerts per user, evaluation interval).
-2. Groups them by `(symbol, timeframe)`; price and drawing alerts use 1-minute bars, indicator
-   alerts use the timeframe they were created on.
+2. Groups them by `(symbol, timeframe)`, the timeframe chosen in the alert dialog (alerts created
+   before the timeframe option keep 1-minute bars for price / drawing alerts).
 3. Fetches the latest bars **once per group** from the live provider (ClickHouse for sources without
    one). Indicator groups fetch 600 extra bars of warm-up; afterwards a cache keeps them and only the
    newest bars are requested.

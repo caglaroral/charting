@@ -64,6 +64,9 @@ test('TC-SCRIPT-04 SqueezeWt port renders in its own pane with signals', async (
   await page.waitForFunction(() => __app.ind.items.some(i => i.res.name === 'SqueezeWt' && i.res.plots));
   const info = await page.evaluate(() => { const it = __app.ind.items.find(i => i.res.name === 'SqueezeWt'); return { pane: it.pane, plots: it.res.plots.length, shapes: it.res.shapes.length, inputs: it.res.inputs.length }; });
   expect(info).toEqual({ pane: 1, plots: 13, shapes: 2, inputs: 24 });
+  // style 'histogram', width 4 is drawn like Pine: 4px bars, not as wide as the bar spacing
+  const hist = await page.evaluate(() => { const s = __app.ind.items.find(i => i.res.name === 'SqueezeWt').series[0]; return { type: s.seriesType(), w: s.options().barWidth }; });
+  expect(hist).toEqual({ type: 'Custom', w: 4 });
   await expect(page.locator('.pane-legend')).toContainText('SqueezeWt 20 2 20 1.5 14 3 3 3 14 14 close 60 21 14 1.9 -1.3 10 21 0.015 60 53 -60 -53');
   await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
   expect(errors).toEqual([]);

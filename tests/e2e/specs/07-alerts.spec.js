@@ -161,3 +161,36 @@ test('TC-ALERT-07 trend line alert follows the line as drawn: extended right, on
   await page.evaluate(() => __app.dm.removeAll());
   await resetLayout(page);
 });
+
+test('TC-ALERT-08 timeframe: "Chart" by default, any available timeframe; closed above / below conditions', async ({ page }) => {
+  await page.evaluate(() => __app.setTf('1h'));
+  await page.click('#btn-alert');
+  const tf = page.locator('[data-testid=alert-tf]');
+  await expect(tf.locator('option').first()).toHaveText('Chart (1 hour)');
+  await expect(tf).toHaveValue('chart');
+  const tfs = await tf.locator('option').evaluateAll(os => os.slice(1).map(o => o.value));
+  expect(tfs).toEqual(await page.evaluate(() => Object.keys(__app.TF_SEC).filter(t => __app.S.availableTfs.includes(t))));
+  const conds = await page.locator('[data-testid=alert-cond] option').evaluateAll(os => os.map(o => o.textContent));
+  expect(conds).toEqual(expect.arrayContaining(['Closed above', 'Closed below']));
+  // default: the chart's timeframe
+  await page.fill('[data-testid=alert-price]', '1000000');
+  await page.selectOption('[data-testid=alert-cond]', 'closed_above');
+  await page.click('[data-testid=alert-save]');
+  await page.click('.rp-tab[data-tab=alerts]');
+  await expect(page.locator('.al-item').first()).toContainText('Price closed above 1000000 (1h)');
+  // another timeframe from the list
+  await page.click('#btn-alert');
+  await page.fill('[data-testid=alert-price]', '1');
+  await page.selectOption('[data-testid=alert-tf]', '4h');
+  await page.selectOption('[data-testid=alert-cond]', 'closed_below');
+  await page.click('[data-testid=alert-save]');
+  await expect(page.locator('.al-item')).toHaveCount(2);
+  const saved = await page.evaluate(async () => (await (await fetch('/api/alerts')).json()).alerts.map(a => `${a.tf} ${a.cond} ${a.spec.price}`).sort());
+  expect(saved).toEqual(['1h closed_above 1000000', '4h closed_below 1']);
+  // editing shows the alert's own timeframe
+  await page.evaluate(() => __app.setTf('15m'));
+  await page.locator('.al-item', { hasText: 'closed below' }).locator('button[title=Edit]').click();
+  await expect(page.locator('[data-testid=alert-tf]')).toHaveValue('4h');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => __app.setTf('1h'));
+});

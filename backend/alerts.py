@@ -8,12 +8,15 @@ Alert kinds
              Indicators are computed by the same JS as the browser (jsrunner -> Node worker).
 
 Conditions: crossing, crossing_up, crossing_down, greater, less, entering, exiting (two-level targets),
+            closed_above, closed_below (the close of a closed bar; the forming bar is skipped),
             signal (a custom plotshape() condition is true on the bar)
+Timeframe : every alert is evaluated on bars of its own timeframe (the dialog defaults to the chart's)
 Frequency : once (deactivates after firing) | once_per_bar
 
 The engine re-evaluates every bar whose time >= alert.last_bar, so the newest (possibly still forming)
 bar is checked on every pass; an alert fires at most once per bar (last_fired).
 """
+import bisect
 import json
 import math
 import sys
@@ -28,13 +31,16 @@ DB = config.CH_APP_DB
 POLL_SECONDS = 20
 WARMUP_BARS = 600
 
-CONDS = {"crossing", "crossing_up", "crossing_down", "greater", "less", "entering", "exiting", "signal"}
+CONDS = {"crossing", "crossing_up", "crossing_down", "greater", "less", "closed_above", "closed_below",
+         "entering", "exiting", "signal"}
+CLOSED_CONDS = {"closed_above", "closed_below"}  # only bars that have closed
 LINE_TOOLS = {"trend", "ray", "extended", "hline", "hray"}
 ZONE_TOOLS = {"rect", "channel"}
 
 COND_TEXT = {
     "crossing": "crossing", "crossing_up": "crossing up", "crossing_down": "crossing down",
-    "greater": "greater than", "less": "less than", "entering": "entering channel", "exiting": "exiting channel",
+    "greater": "greater than", "less": "less than", "closed_above": "closed above", "closed_below": "closed below",
+    "entering": "entering channel", "exiting": "exiting channel",
     "signal": "signal",
 }
 
@@ -131,7 +137,7 @@ def save_alert(user, a: dict) -> dict:
     if kind not in ("price", "drawing", "indicator") or cond not in CONDS:
         raise ValueError("Invalid alert")
     spec = a.get("spec") or {}
-    tf = a.get("tf") if kind == "indicator" else "1m"
+    tf = a.get("tf") or "1m"  # every kind is evaluated on the timeframe chosen in the dialog
     if tf not in market.TIMEFRAMES:
         raise ValueError("Invalid timeframe")
     if kind == "price":
@@ -221,20 +227,46 @@ def _indicator_types():
 
 # --------------------------------------------------------------------------- geometry
 
-def _interp(p0, p1, t, log=False):
-    """Price of the line through p0 and p1 at time t. On a log scale the line on screen is straight in
-    log(price), so it is interpolated there (only when both prices are positive)."""
-    if p1["t"] == p0["t"]:
+class BarIndex:
+    """Maps a time to a (fractional) bar index the way the chart does (drawings.js _barsIdx): the chart
+    lays bars out by index, so a gap in the data takes no room on screen and a line drawn across it is
+    straight in bar index, not in time. Before the first / after the last known bar, one bar per
+    timeframe step."""
+
+    def __init__(self, times: list[int], sec: int):
+        self.t, self.sec = times, sec
+
+    def __call__(self, t: float) -> float:
+        ts, sec = self.t, self.sec
+        n = len(ts)
+        if not n:
+            return t / sec
+        if t <= ts[0]:
+            return (t - ts[0]) / sec
+        if t >= ts[-1]:
+            return n - 1 + (t - ts[-1]) / sec
+        hi = bisect.bisect_right(ts, t)
+        lo = hi - 1
+        return lo + (t - ts[lo]) / (ts[hi] - ts[lo])
+
+
+def _interp(p0, p1, t, log=False, idx=None):
+    """Price of the line through p0 and p1 at time t, in bar index space (idx, see BarIndex; plain time
+    without it). On a log scale the line on screen is straight in log(price), so it is interpolated there
+    (only when both prices are positive)."""
+    x0, x1, x = (p0["t"], p1["t"], t) if idx is None else (idx(p0["t"]), idx(p1["t"]), idx(t))
+    if x1 == x0:
         return None
-    k = (t - p0["t"]) / (p1["t"] - p0["t"])
+    k = (x - x0) / (x1 - x0)
     if log and p0["p"] > 0 and p1["p"] > 0:
         return math.exp(math.log(p0["p"]) + (math.log(p1["p"]) - math.log(p0["p"])) * k)
     return p0["p"] + (p1["p"] - p0["p"]) * k
 
 
-def drawing_levels(d: dict, t: int, log: bool = False):
+def drawing_levels(d: dict, t: int, log: bool = False, idx=None):
     """Return (lo, hi) for zone tools, (v, v) for line tools, or None if not defined at time t.
-    log: the chart is on a log scale (lines follow what is drawn on screen)."""
+    log: the chart is on a log scale; idx: time -> bar index (BarIndex). Both make the level follow the
+    line as it is drawn on screen."""
     tool, pts = d.get("tool"), d.get("points") or []
     st = d.get("style") or {}
     if tool in ("hline", "crossline") and pts:
@@ -257,8 +289,8 @@ def drawing_levels(d: dict, t: int, log: bool = False):
     elif tool == "channel":
         if len(pts) < 3 or (t < lo_t and not st.get("extendLeft")) or (t > hi_t and not st.get("extend")):
             return None
-        base = _interp(p0, p1, t, log)
-        at2 = _interp(p0, p1, pts[2]["t"], log)
+        base = _interp(p0, p1, t, log, idx)
+        at2 = _interp(p0, p1, pts[2]["t"], log, idx)
         if base is None or at2 is None:
             return None
         if log and base > 0 and at2 > 0 and pts[2]["p"] > 0:
@@ -268,7 +300,7 @@ def drawing_levels(d: dict, t: int, log: bool = False):
         return (min(base, other), max(base, other))
     elif tool != "extended":
         return None
-    v = _interp(p0, p1, t, log)
+    v = _interp(p0, p1, t, log, idx)
     return None if v is None else (v, v)
 
 
@@ -283,6 +315,10 @@ def _check(cond, prev_x, x, x_hi, x_lo, prev_lv, lv):
     if cond == "greater":
         return x > hi
     if cond == "less":
+        return x < lo
+    if cond == "closed_above":  # the caller only passes closed bars
+        return x > hi
+    if cond == "closed_below":
         return x < lo
     if prev_lv is None or prev_x is None:
         return False
@@ -326,16 +362,17 @@ def _indicator_plots(alert: dict, raw_bars: list[list]) -> dict | None:
     return jsrunner.compute(req, raw_bars)["plots"]
 
 
-def _user_log_scale(uid: str) -> bool:
-    """Whether the user's chart is on a log scale: lines are then followed as drawn on screen."""
+def _user_view(uid: str) -> tuple[bool, str]:
+    """The user's chart (saved layout): log scale?, timeframe. Lines are followed as drawn there."""
     try:
         layout = store.get_setting(uid, "layout") or {}
-        return int(layout.get("scaleMode") or 0) == 1
     except Exception:
-        return False
+        layout = {}
+    tf = layout.get("tf") if layout.get("tf") in market.TIMEFRAMES else "1h"
+    return int(layout.get("scaleMode") or 0) == 1, tf
 
 
-def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None, log: bool = False):
+def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None, log: bool = False, idx=None):
     """Return ([(bar_time, price)], new_last_bar)."""
     if len(bars) < 2:
         return [], alert["last_bar"]
@@ -378,13 +415,18 @@ def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None, log:
             d = drawings.get(spec.get("drawing_id"))
             if d is None:
                 return None, bars[-1]["time"]  # drawing deleted -> caller deactivates
-            level = lambda i: drawing_levels(d, bars[i]["time"], log)
+            level = lambda i: drawing_levels(d, bars[i]["time"], log, idx)
 
     fired = []
+    # "closed above / below": a bar counts once it has closed; the forming bar stays >= last_bar and is
+    # evaluated again on a later pass, after its close
+    closed_until = time.time() - market.TIMEFRAMES.get(alert["tf"], 60) if cond in CLOSED_CONDS else None
     for i in range(start, len(bars)):
         x = xs[i]
         if x is None or bars[i]["time"] == alert["last_fired"]:
             continue
+        if closed_until is not None and bars[i]["time"] > closed_until:
+            break
         if _check(cond, xs[i - 1], x, his[i], los[i], level(i - 1), level(i)):
             fired.append((bars[i]["time"], bars[i]["close"]))
             if alert["frequency"] == "once":
@@ -396,9 +438,9 @@ def _default_message(alert):
     spec = alert["spec"]
     c = COND_TEXT.get(alert["cond"], alert["cond"])
     if alert["kind"] == "price":
-        return f"{alert['symbol']} price {c} {spec['price']}"
+        return f"{alert['symbol']} {alert['tf']} price {c} {spec['price']}"
     if alert["kind"] == "drawing":
-        return f"{alert['symbol']} drawing ({spec.get('tool', '')}) {c}"
+        return f"{alert['symbol']} {alert['tf']} drawing ({spec.get('tool', '')}) {c}"
     tgt = spec.get("target") or {}
     rhs = "" if alert["cond"] == "signal" else tgt.get("plot") if tgt.get("type") == "plot" else tgt.get("value")
     name = spec.get("name") or spec.get("type", "").upper()
@@ -431,6 +473,45 @@ def _due_alerts(alerts_: list[dict]) -> list[dict]:
     return due
 
 
+_SLOPED = ("trend", "ray", "extended", "channel")
+_HIST_TTL = 600
+_hist_times: dict = {}  # (symbol, tf) -> (fetched_at, oldest time needed, ClickHouse bar times)
+_indexes: dict = {}  # (symbol, tf) -> (built_at, oldest time covered, BarIndex)
+_INDEX_TTL = 300
+INDEX_RECENT_BARS = 500  # the chart starts with the exchange's latest 500 bars (REST default) + history
+
+
+def _bar_index(symbol: str, tf: str, since: int) -> BarIndex | None:
+    """Bar index of the chart the user looks at (timeframe tf): the exchange's latest bars plus the
+    ClickHouse history before them, back to `since` (the oldest drawing point; at most market.MAX_LIMIT
+    bars). Gaps in this data take no room on the chart, so the line crosses them in one bar. Latest
+    bars come from the live provider's cache (incremental after the first call); the history is
+    cached for a while."""
+    sec = market.TIMEFRAMES[tf]
+    try:
+        recent = [int(r[0]) for r in market.recent_bars(symbol, tf, INDEX_RECENT_BARS)]
+    except Exception as e:
+        print(f"alert bar index {symbol} {tf}: {e}")
+        return None
+    if not recent:
+        return None
+    first = recent[0]
+    if since >= first:
+        return BarIndex(recent, sec)
+    key = (symbol, tf)
+    c = _hist_times.get(key)
+    if not c or time.time() - c[0] > _HIST_TTL or c[1] > since:
+        want = min(market.MAX_LIMIT, int((first - since) / sec) + 2)
+        try:
+            hist = [int(r[0]) for r in market.bars(symbol, tf, first, want)]
+        except Exception as e:
+            print(f"alert history {symbol} {tf}: {e}")
+            hist = []
+        c = (time.time(), since, hist)
+        _hist_times[key] = c
+    return BarIndex([t for t in c[2] if t < first] + recent, sec)
+
+
 def run_once() -> int:
     rows = ch.query(f"SELECT user_id, {_COLS} FROM {DB}.alerts FINAL WHERE deleted = 0 AND active = 1")
     if not rows:
@@ -458,16 +539,30 @@ def run_once() -> int:
             continue
         bars = _bars_dicts(raw)
 
-        drawings, log_scale = {}, {}
+        drawings, view = {}, {}
         for a in group:
             if a["kind"] == "drawing" and a["user_id"] not in drawings:
                 drawings[a["user_id"]] = {d["id"]: d for d in store.list_drawings(a["user_id"], symbol)}
-                log_scale[a["user_id"]] = _user_log_scale(a["user_id"])
+                view[a["user_id"]] = _user_view(a["user_id"])
+
+        # Sloped lines are straight in bar index on the user's chart (gaps take no room): map times the
+        # same way, on the timeframe the user looks at. The index is kept for a few minutes (no extra
+        # exchange request per pass); after its last bar it steps one bar per timeframe, as the chart.
+        def index_for(a):
+            d = drawings.get(a["user_id"], {}).get(a["spec"].get("drawing_id"))
+            if a["kind"] != "drawing" or not d or d.get("tool") not in _SLOPED or not d.get("points"):
+                return None
+            key = (symbol, view[a["user_id"]][1])
+            since = int(min(p["t"] for p in d["points"]))
+            c = _indexes.get(key)
+            if not c or c[1] > since or time.time() - c[0] > _INDEX_TTL:
+                c = _indexes[key] = (time.time(), since, _bar_index(symbol, key[1], since))
+            return c[2]
 
         for a in group:
             try:
                 fired, new_last = _evaluate(a, bars, drawings.get(a["user_id"], {}), raw,
-                                            log=log_scale.get(a["user_id"], False))
+                                            log=view.get(a["user_id"], (False,))[0], idx=index_for(a))
             except Exception:
                 traceback.print_exc()
                 continue

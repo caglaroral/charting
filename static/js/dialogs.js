@@ -273,10 +273,13 @@ export async function scriptEditor(app, scriptId = null) {
 
 // ======================================================================= alerts
 const CONDS = {
-  line: ['crossing', 'crossing_up', 'crossing_down', 'greater', 'less'],
-  zone: ['entering', 'exiting', 'crossing', 'crossing_up', 'crossing_down'],
+  line: ['crossing', 'crossing_up', 'crossing_down', 'greater', 'less', 'closed_above', 'closed_below'],
+  zone: ['entering', 'exiting', 'crossing', 'crossing_up', 'crossing_down', 'closed_above', 'closed_below'],
 };
-const COND_NAMES = { crossing: 'Crossing', crossing_up: 'Crossing up', crossing_down: 'Crossing down', greater: 'Greater than', less: 'Less than', entering: 'Entering channel', exiting: 'Exiting channel', signal: 'Signal (shape appears)' };
+const COND_NAMES = {
+  crossing: 'Crossing', crossing_up: 'Crossing up', crossing_down: 'Crossing down', greater: 'Greater than', less: 'Less than',
+  closed_above: 'Closed above', closed_below: 'Closed below', entering: 'Entering channel', exiting: 'Exiting channel', signal: 'Signal (shape appears)',
+};
 
 export function alertDialog(app, { kind, inst, drawing, alert } = {}) {
   const S = app.S;
@@ -287,6 +290,12 @@ export function alertDialog(app, { kind, inst, drawing, alert } = {}) {
   const rows = [];
   const add = (label, input) => { rows.push(el('label', {}, label), input); return input; };
   rows.push(el('label', {}, 'Symbol'), el('div', {}, app.symbolName(symbol)));
+  // Timeframe the alert is evaluated on: "Chart" (the chart's timeframe now) or one of the timeframes
+  // this symbol has. Editing shows the alert's own timeframe.
+  const tfs = Object.keys(app.TF_SEC).filter(tf => S.availableTfs.includes(tf) || tf === alert?.tf);
+  const tfSel = add('Timeframe', el('select', { 'data-testid': 'alert-tf' },
+    el('option', { value: 'chart', selected: !alert }, `Chart (${app.TF_NAME[S.tf]})`),
+    tfs.map(tf => el('option', { value: tf, selected: alert?.tf === tf }, app.TF_NAME[tf]))));
 
   let priceIn, plotSel, targetType, targetVal, targetPlot, conds, res;
   const lastClose = S.bars.length ? S.bars[S.bars.length - 1].close : 0;
@@ -358,9 +367,9 @@ export function alertDialog(app, { kind, inst, drawing, alert } = {}) {
   plotSel?.addEventListener('change', renderConds);
   targetType?.addEventListener('change', renderConds);
   renderConds();
-  const help = kind === 'indicator'
-    ? `Evaluated on the server on the ${alert?.tf || S.tf} timeframe with the same JS code as the chart.`
-    : 'Price/drawing alerts are evaluated on the server on 1-minute bars (live data). Moving the drawing moves the alert too.';
+  const help = 'Evaluated on the server on bars of the chosen timeframe (live data). Crossing, greater and less '
+    + 'also check the bar that is still forming; "Closed above / below" only bars that have closed.'
+    + (kind === 'indicator' ? ' The indicator runs with the same JS code as the chart.' : kind === 'drawing' ? ' Moving the drawing moves the alert too.' : '');
 
   const m = modal({
     title: editing ? 'Edit alert' : 'Create alert', width: '520px',
@@ -370,11 +379,11 @@ export function alertDialog(app, { kind, inst, drawing, alert } = {}) {
       el('button', { class: 'btn primary', 'data-testid': 'alert-save', onclick: async () => {
         const a = { id: alert?.id, symbol, kind, cond: condSel.value, frequency: freqSel.value, message: msgIn.value, active: 1,
           channels: Object.entries(chBoxes).filter(([, b]) => b.checked).map(([c]) => c) };
-        if (kind === 'price') { a.spec = { price: Number(priceIn.value) }; a.tf = '1m'; }
-        else if (kind === 'drawing') { a.spec = { drawing_id: drawing.id, tool: drawing.tool }; a.tf = '1m'; }
+        a.tf = tfSel.value === 'chart' ? S.tf : tfSel.value;
+        if (kind === 'price') a.spec = { price: Number(priceIn.value) };
+        else if (kind === 'drawing') a.spec = { drawing_id: drawing.id, tool: drawing.tool };
         else {
           const custom = (inst?.type || spec0.type) === 'custom';
-          a.tf = alert?.tf || S.tf;
           a.spec = {
             type: custom ? 'custom' : (inst?.type || spec0.type), script_id: custom ? (inst?.script_id || spec0.script_id) : undefined,
             params: inst ? (custom ? inst.params || {} : { ...defaultParams(inst.type), ...(inst.params || {}) }) : spec0.params,

@@ -32,7 +32,7 @@ plotshape(ta.crossover(r, 30), { title: 'Buy', location: 'bottom', color: color.
 | `indicator(name, {overlay, precision})` | `overlay: true` draws on the price pane, otherwise a new pane; `precision`: axis decimals of that pane (default: 2 for values ≥ 1, more for small values) |
 | `input(title, default, [options])` | number / string / bool input; `input.int/float/bool/string` are aliases |
 | `input.source(title, 'close')`, `input.select(title, default, options)` | |
-| `plot(series, {title, color, width, style})` | style `line`, `histogram`, `circles`, `area`, `cross`, `stepline`; `color` may be a color, an array of colors or `i => color` (per bar; `null` = invisible) |
+| `plot(series, {title, color, width, style})` | style `line`, `histogram` (bars of `width` pixels, like Pine's `style_histogram`), `columns` (bars as wide as the bar spacing, Pine's `style_columns`), `circles`, `area`, `cross`, `stepline`; `color` may be a color, an array of colors or `i => color` (per bar; `null` = invisible) |
 | `hline(value, {color, title})` | horizontal level |
 | `plotshape(bools, {title, location, color, shape, text, textcolor, size})` | location `abovebar`, `belowbar`, `top` / `bottom` (fixed at the pane edge, they do not move with the data), `absolute` (at the series value; pass numbers instead of booleans); shape `triangleup/down`, `arrowup/down`, `labelup/down`, `circle`, `square`, `diamond`, `cross`, `xcross`, `flag`; size `tiny`, `small`, `auto`, `normal`, `large`, `huge` |
 | `fill(a, b, {color})` | shade between two series; per-bar color supported |
