@@ -126,7 +126,10 @@ export function runScript(code, bars, inputValues = {}, evaluator = defaultEvalu
   };
 
   const scope = {
-    indicator: (name, opts = {}) => { out.meta.name = String(name); out.meta.overlay = !!opts.overlay; },
+    indicator: (name, opts = {}) => {
+      out.meta.name = String(name); out.meta.overlay = !!opts.overlay;
+      if (opts.precision != null && Number.isFinite(+opts.precision)) out.meta.precision = +opts.precision;
+    },
     input,
     plot: (s, o = {}) => {
       const i = out.plots.length;

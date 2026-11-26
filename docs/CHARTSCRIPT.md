@@ -29,7 +29,7 @@ plotshape(ta.crossover(r, 30), { title: 'Buy', location: 'bottom', color: color.
 
 | API | Notes |
 | --- | --- |
-| `indicator(name, {overlay})` | `overlay: true` draws on the price pane, otherwise a new pane |
+| `indicator(name, {overlay, precision})` | `overlay: true` draws on the price pane, otherwise a new pane; `precision`: axis decimals of that pane (default: 2 for values ≥ 1, more for small values) |
 | `input(title, default, [options])` | number / string / bool input; `input.int/float/bool/string` are aliases |
 | `input.source(title, 'close')`, `input.select(title, default, options)` | |
 | `plot(series, {title, color, width, style})` | style `line`, `histogram`, `circles`, `area`, `cross`, `stepline`; `color` may be a color, an array of colors or `i => color` (per bar; `null` = invisible) |

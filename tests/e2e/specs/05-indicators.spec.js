@@ -131,6 +131,8 @@ test('TC-IND-07 indicator panes have their own auto / log scale buttons, indepen
   await page.click('#sb-log');
   expect(await page.evaluate(() => [__app.chart.priceScale('right', 0).options().mode, __app.chart.priceScale('right', 1).options().mode])).toEqual([1, 0]);
   await page.click('#sb-log');
+  // the oscillator axis has its own format (2 decimals), not the symbol's price decimals
+  expect(await page.evaluate(() => [__app.chart.options().localization.priceFormatter, __app.ind.items.find(i => i.pane === 1).series[0].options().priceFormat.precision])).toEqual([undefined, 2]);
   const btns = page.locator('.pane-scale-btns[data-pane="1"]');
   await expect(btns.locator('[data-testid=pane-auto]')).toHaveClass(/active/);
   await btns.locator('[data-testid=pane-log]').click();

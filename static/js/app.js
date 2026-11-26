@@ -225,7 +225,9 @@ function createChart() {
     crosshair: { mode: LWC.CrosshairMode.Normal, vertLine: { color: '#9598a1', labelBackgroundColor: '#363a45' }, horzLine: { color: '#9598a1', labelBackgroundColor: '#363a45' } },
     rightPriceScale: { borderColor: '#2a2e39', scaleMargins: { top: 0.08, bottom: 0.08 } },
     timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false, rightOffset: 12, barSpacing: 7 },
-    localization: { timeFormatter: (t) => fmtTime(t, TF_SEC[S.tf] < 86400), priceFormatter: (p) => app.fmtPrice(p) },
+    // no chart-wide priceFormatter: every price scale uses the format of its own series (symbol decimals
+    // on the price pane, the indicator's precision on indicator panes)
+    localization: { timeFormatter: (t) => fmtTime(t, TF_SEC[S.tf] < 86400) },
   });
   applyCanvasStyle();
   app.dm = new DrawingManager({
@@ -785,7 +787,7 @@ async function computeIndicator(inst) {
     inst.inputs = res.inputs;
     inst.name = res.meta.name || sc.name;
     return {
-      name: res.meta.name || sc.name, overlay: res.meta.overlay, inputs: res.inputs,
+      name: res.meta.name || sc.name, overlay: res.meta.overlay, precision: res.meta.precision, inputs: res.inputs,
       plots: res.plots.map(p => ({ ...p, color: inst.colors?.[p.k] || p.color })),
       hlines: res.hlines, shapes: res.shapes.map(s => ({ ...s, color: inst.colors?.[s.k] || s.color })),
       fills: res.fills || [],
@@ -1185,6 +1187,26 @@ function clearIndicatorSeries() {
   while (app.chart.panes().length > 1) app.chart.removePane(app.chart.panes().length - 1);
 }
 
+// Axis format of an indicator pane: indicator(..., { precision }) if given, else 2 decimals for
+// values of 1 and more (oscillators), more for small values (e.g. MACD of a low-priced coin).
+function paneFormat(res) {
+  let d = res.precision;
+  if (d == null) {
+    const vals = [];
+    for (const p of res.plots) {
+      for (let i = Math.max(0, p.data.length - 500); i < p.data.length; i++) {
+        const v = p.data[i];
+        if (v != null && v !== 0 && Number.isFinite(v)) vals.push(Math.abs(v));
+      }
+    }
+    vals.sort((a, b) => a - b);
+    const m = vals.length ? vals[vals.length >> 1] : 1;
+    d = m >= 1 ? 2 : Math.min(8, Math.ceil(-Math.log10(m)) + 2);
+  }
+  d = Math.max(0, Math.min(10, Math.round(d)));
+  return { type: 'price', precision: d, minMove: Math.pow(10, -d) };
+}
+
 function rebuildIndicatorSeries(items) {
   const c = app.chart;
   clearIndicatorSeries();
@@ -1199,7 +1221,7 @@ function rebuildIndicatorSeries(items) {
     const scaleId = res.volume ? `vol_${inst.id}` : 'right';
     for (const p of res.plots) {
       const common = { priceScaleId: scaleId, lastValueVisible: !res.volume, priceLineVisible: false, title: '', crosshairMarkerVisible: false }; // no dots on the crosshair
-      if (!res.volume && !res.overlay) common.priceFormat = { type: 'price', precision: 2, minMove: 0.01 };
+      if (!res.volume && !res.overlay) common.priceFormat = paneFormat(res);
       if (res.overlay && !res.volume) common.priceFormat = { type: 'price', precision: S.priceDecimals, minMove: Math.pow(10, -S.priceDecimals) };
       if (res.volume) common.priceFormat = { type: 'volume' };
       let s;
