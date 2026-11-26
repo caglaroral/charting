@@ -106,3 +106,52 @@ test('TC-SCRIPT-06 the editor opens the ChartScript reference in a new tab', asy
   await expect(docs.locator('#named-colors tr')).toHaveCount(7);
   await docs.close();
 });
+
+test('TC-SCRIPT-07 plotshape: diamonds at the pane top / bottom stay fixed at the pane edge while scrolling', async ({ page }) => {
+  const code = `indicator('Shapes e2e', { overlay: false })
+plot(close, { title: 'Close', color: '#787b86' })
+const every = close.map((_, i) => i % 10 === 0)
+plotshape(every, { title: 'Top', location: 'top', shape: 'diamond', color: '#ff00ff' })
+plotshape(every, { title: 'Bottom', location: 'bottom', shape: 'diamond', color: '#00ff00' })`;
+  const r = await page.evaluate(async (code) => {
+    const res = await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Shapes e2e', code }) });
+    return (await res.json()).script;
+  }, code);
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.view.length > 50);
+  await page.evaluate((id) => __app.addIndicator('custom', { script_id: id }), r.id);
+  await page.waitForFunction(() => __app.ind.items.some(i => i.res.name === 'Shapes e2e' && i.res.shapes?.length === 2 && i.pane != null), null, { timeout: 30_000 });
+  await page.mouse.move(5, 5);
+  // color of the pane canvases at media point (x, y); y < 0 counts from the pane bottom
+  const probe = (i) => page.evaluate((i) => {
+    const it = __app.ind.items.find(x => x.res.name === 'Shapes e2e');
+    const pane = __app.chart.panes()[it.pane].getHTMLElement();
+    const x = __app.chart.timeScale().logicalToCoordinate(i);
+    const h = __app.chart.panes()[it.pane].getHeight();
+    const at = (y) => {
+      for (const c of pane.querySelectorAll('canvas')) {
+        const k = c.width / c.clientWidth, d = c.getContext('2d').getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data;
+        if (d[3] > 200 && (d[0] > 200 || d[1] > 200)) return `${d[0] > 200 ? 'r' : ''}${d[1] > 200 ? 'g' : ''}${d[2] > 200 ? 'b' : ''}`;
+      }
+      return null;
+    };
+    return { top: at(4 + 4.5), bottom: at(h - 4 - 4.5) };
+  }, i);
+  // a marked bar in the visible range, away from the edges
+  const markedBar = () => page.evaluate(() => {
+    const r = __app.chart.timeScale().getVisibleLogicalRange();
+    const it = __app.ind.items.find(x => x.res.name === 'Shapes e2e');
+    const off = __app.S.view.length - it.res.shapes[0].data.length;
+    for (let i = Math.ceil(r.to) - 15; i > r.from + 5; i--) if (it.res.shapes[0].data[i - off]) return i;
+    return null;
+  });
+  const i = await markedBar();
+  expect(i).not.toBeNull();
+  await expect.poll(() => probe(i)).toEqual({ top: 'rb', bottom: 'g' }); // magenta at the top, green at the bottom
+  // scroll: the bar moves horizontally, the shapes stay at the pane edges
+  await page.evaluate(() => { const ts = __app.chart.timeScale(); ts.scrollToPosition(ts.scrollPosition() - 3, false); });
+  await page.waitForTimeout(300);
+  await expect.poll(() => probe(i)).toEqual({ top: 'rb', bottom: 'g' });
+  await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
+  await resetLayout(page);
+});

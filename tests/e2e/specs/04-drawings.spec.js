@@ -119,6 +119,6 @@ test('TC-DRAW-04 eraser cursor deletes, measure tool is temporary, zoom changes 
   const before = await page.evaluate(() => __app.chart.timeScale().getVisibleLogicalRange());
   await page.click('.lt-btn[data-tool=zoom]');
   await drawWithClicks(page, 2);
-  const after = await page.evaluate(() => __app.chart.timeScale().getVisibleLogicalRange());
-  expect(after.to - after.from).toBeLessThan(before.to - before.from);
+  // the range is applied by the chart asynchronously
+  await expect.poll(() => page.evaluate(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return r.to - r.from; })).toBeLessThan(before.to - before.from);
 });

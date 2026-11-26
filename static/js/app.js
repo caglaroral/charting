@@ -984,18 +984,124 @@ function seriesData(plot) {
   return out;
 }
 
-const SHAPE_MAP = { triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', circle: 'circle', square: 'square', diamond: 'square', cross: 'square', xcross: 'square', flag: 'square' };
-function markersFor(res) {
-  const out = [];
-  for (const s of res.shapes) {
-    const pos = s.location === 'belowbar' || s.location === 'bottom' ? 'belowBar' : 'aboveBar';
-    s.data.forEach((v, i) => {
-      if (!v || !S.view[i]) return;
-      out.push({ time: S.view[i].time, position: pos, shape: SHAPE_MAP[s.shape] || 'circle', color: (s.colors && s.colors[i]) || s.color, text: s.text || '', size: 1 });
-    });
+// plotshape() markers, drawn like Pine: every shape type, sizes, text, and locations
+//   top / bottom          fixed at the pane edge (do not move with the data)
+//   abovebar / belowbar   above the bar high / below the bar low (price pane) or above / below the
+//                         indicator's first plot (own pane); several shapes on one bar stack
+//   absolute              at the series value
+const SHAPE_SIZE = { tiny: 6, small: 9, auto: 9, normal: 13, large: 19, huge: 27 };
+const SHAPE_GAP = 4;
+
+function drawShape(ctx, shape, x, y, s, color) {
+  const h = s / 2;
+  ctx.fillStyle = color; ctx.strokeStyle = color;
+  ctx.beginPath();
+  switch (shape) {
+    case 'diamond': ctx.moveTo(x, y - h * 1.15); ctx.lineTo(x + h, y); ctx.lineTo(x, y + h * 1.15); ctx.lineTo(x - h, y); break;
+    case 'triangleup': ctx.moveTo(x, y - h); ctx.lineTo(x + h, y + h); ctx.lineTo(x - h, y + h); break;
+    case 'triangledown': ctx.moveTo(x, y + h); ctx.lineTo(x + h, y - h); ctx.lineTo(x - h, y - h); break;
+    case 'arrowup': case 'arrowdown': {
+      const d = shape === 'arrowup' ? 1 : -1, w = h * 0.4;
+      ctx.moveTo(x, y - d * h); ctx.lineTo(x + h, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + d * h);
+      ctx.lineTo(x - w, y + d * h); ctx.lineTo(x - w, y); ctx.lineTo(x - h, y);
+      break;
+    }
+    case 'square': ctx.rect(x - h, y - h, s, s); break;
+    case 'cross': case 'xcross': {
+      ctx.lineWidth = Math.max(1.5, s / 5);
+      const r = shape === 'cross' ? h : h * 0.8;
+      if (shape === 'cross') { ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); }
+      else { ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); }
+      ctx.stroke();
+      return;
+    }
+    case 'flag':
+      ctx.rect(x - h, y - h, Math.max(1, s / 8), s);
+      ctx.moveTo(x - h, y - h); ctx.lineTo(x + h, y - h * 0.5); ctx.lineTo(x - h, y);
+      break;
+    default: ctx.arc(x, y, h, 0, Math.PI * 2);
   }
-  out.sort((a, b) => a.time - b.time);
-  return out;
+  ctx.closePath();
+  ctx.fill();
+}
+
+function shapePrimitive(it, series, overlay) {
+  let req = null;
+  const prim = {
+    attached: ({ requestUpdate }) => { req = requestUpdate; },
+    detached: () => { req = null; },
+    paneViews: () => views,
+    update: () => req && req(),
+  };
+  const views = [{
+    zOrder: () => 'top',
+    renderer: () => ({
+      draw: (target) => target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+        const shapes = it.res.shapes || [];
+        if (!shapes.length || !it.inst.visible) return;
+        const ts = app.chart.timeScale();
+        const range = ts.getVisibleLogicalRange();
+        if (!range) return;
+        const off = resOff(it.res);
+        const i0 = Math.max(off, Math.floor(range.from) - 1), i1 = Math.min(S.view.length - 1, Math.ceil(range.to) + 1);
+        const ref = !overlay && it.res.plots?.[0]?.data;
+        const Y = (v) => (v == null ? null : series.priceToCoordinate(v));
+        const fs = 11;
+        ctx.font = `${fs}px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif`;
+        ctx.textAlign = 'center';
+        for (let i = i0; i <= i1; i++) {
+          const j = i - off;
+          const x = ts.logicalToCoordinate(i);
+          if (x == null || x < -20 || x > mediaSize.width + 20) continue;
+          const stack = { top: 0, bottom: 0, abovebar: 0, belowbar: 0 };
+          for (const sh of shapes) {
+            if (!sh.data[j]) continue;
+            const sz = SHAPE_SIZE[sh.size] || SHAPE_SIZE.auto, loc = sh.location;
+            const color = (sh.colors && sh.colors[j]) || sh.color;
+            if (!color || color === 'rgba(0,0,0,0)') continue;
+            let y, dir; // dir: +1 text goes below the shape, -1 above
+            if (loc === 'top') { y = SHAPE_GAP + stack.top + sz / 2; stack.top += sz + 2; dir = 1; }
+            else if (loc === 'bottom') { y = mediaSize.height - SHAPE_GAP - stack.bottom - sz / 2; stack.bottom += sz + 2; dir = -1; }
+            else if (loc === 'absolute') { y = Y(sh.values?.[j]); dir = 1; }
+            else {
+              const below = loc === 'belowbar';
+              const b = S.view[i];
+              const base = overlay ? Y(below ? b.low : b.high) : Y(ref ? ref[j] : null);
+              if (base == null) continue;
+              const k = below ? 'belowbar' : 'abovebar';
+              y = below ? base + SHAPE_GAP + stack[k] + sz / 2 : base - SHAPE_GAP - stack[k] - sz / 2;
+              stack[k] += sz + 2;
+              dir = below ? 1 : -1;
+            }
+            if (y == null) continue;
+            const label = sh.shape === 'labelup' || sh.shape === 'labeldown';
+            if (label) {
+              // Pine labels: a box with a pointer towards the bar, text inside
+              const t = String(sh.text || ''), w = Math.max(sz, ctx.measureText(t).width + 8), hh = Math.max(sz, fs + 6);
+              const up = sh.shape === 'labelup', p = 4;
+              const top = up ? y - hh / 2 + p : y - hh / 2 - p;
+              ctx.fillStyle = color;
+              ctx.beginPath();
+              ctx.rect(x - w / 2, top, w, hh);
+              if (up) { ctx.moveTo(x - p, top); ctx.lineTo(x, top - p); ctx.lineTo(x + p, top); }
+              else { ctx.moveTo(x - p, top + hh); ctx.lineTo(x, top + hh + p); ctx.lineTo(x + p, top + hh); }
+              ctx.fill();
+              if (t) { ctx.fillStyle = sh.textColor || '#ffffff'; ctx.textBaseline = 'middle'; ctx.fillText(t, x, top + hh / 2); }
+              continue;
+            }
+            drawShape(ctx, sh.shape, x, y, sz, color);
+            if (sh.text) {
+              ctx.fillStyle = sh.textColor || color;
+              ctx.textBaseline = dir > 0 ? 'top' : 'bottom';
+              ctx.fillText(sh.text, x, y + dir * (sz / 2 + 2));
+            }
+          }
+        }
+      }),
+    }),
+  }];
+  series.attachPrimitive(prim);
+  return prim;
 }
 
 // Draws ChartScript fill() areas between two series below the indicator lines.
@@ -1070,7 +1176,7 @@ function fillPrimitive(it, series) {
 
 function clearIndicatorSeries() {
   for (const it of app.ind.items) {
-    for (const m of it.markers || []) { try { m.detach(); } catch { /* */ } }
+    if (it.shapePrim) { try { it.shapeTarget.detachPrimitive(it.shapePrim); } catch { /* */ } }
     if (it.fillPrim) { try { it.fillTarget.detachPrimitive(it.fillPrim); } catch { /* */ } }
     for (const s of it.series || []) { try { app.chart.removeSeries(s); } catch { /* */ } }
   }
@@ -1084,7 +1190,7 @@ function rebuildIndicatorSeries(items) {
   clearIndicatorSeries();
   let paneIdx = 0;
   for (const { inst, res } of items) {
-    const it = { inst, res, series: [], markers: [], pane: null, own: false };
+    const it = { inst, res, series: [], pane: null, own: false };
     app.ind.items.push(it);
     if (!inst.visible || res.error) continue;
     const pane = res.overlay ? 0 : ++paneIdx;
@@ -1124,7 +1230,7 @@ function rebuildIndicatorSeries(items) {
     }
     if (res.shapes.length) {
       const target = res.overlay ? app.mainSeries : it.series[0];
-      if (target) it.markers.push(LWC.createSeriesMarkers(target, markersFor(res)));
+      if (target) { it.shapeTarget = target; it.shapePrim = shapePrimitive(it, target, !!res.overlay); }
     }
   }
   // Price pane position among the panes (indicator panes moved above it).
@@ -1162,7 +1268,7 @@ function updateIndicatorData(items) {
     if (!it.inst.visible || res.error) return;
     res.plots.forEach((p, j) => { if (it.series[j]) syncSeries(it.series[j], prev?.plots?.[j], p); });
     it.fillPrim?.update();
-    if (it.markers[0]) it.markers[0].setMarkers(markersFor(res));
+    it.shapePrim?.update();
   });
 }
 

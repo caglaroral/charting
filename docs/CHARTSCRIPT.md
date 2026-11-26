@@ -34,7 +34,7 @@ plotshape(ta.crossover(r, 30), { title: 'Buy', location: 'bottom', color: color.
 | `input.source(title, 'close')`, `input.select(title, default, options)` | |
 | `plot(series, {title, color, width, style})` | style `line`, `histogram`, `circles`, `area`, `cross`, `stepline`; `color` may be a color, an array of colors or `i => color` (per bar; `null` = invisible) |
 | `hline(value, {color, title})` | horizontal level |
-| `plotshape(bools, {title, location, color, shape, text})` | location `abovebar`, `belowbar`, `top`, `bottom`; shape `triangleup/down`, `arrowup/down`, `circle`, `square`, `diamond` |
+| `plotshape(bools, {title, location, color, shape, text, textcolor, size})` | location `abovebar`, `belowbar`, `top` / `bottom` (fixed at the pane edge, they do not move with the data), `absolute` (at the series value; pass numbers instead of booleans); shape `triangleup/down`, `arrowup/down`, `labelup/down`, `circle`, `square`, `diamond`, `cross`, `xcross`, `flag`; size `tiny`, `small`, `auto`, `normal`, `large`, `huge` |
 | `fill(a, b, {color})` | shade between two series; per-bar color supported |
 | `fill(a, b, {topValue, bottomValue, topColor, bottomColor})` | vertical gradient between two series: `topColor` at `topValue`, `bottomColor` at `bottomValue` (`null` = transparent); colors may be per bar |
 | `security(tf, s => expr)` | evaluate on another timeframe (`'4h'`, `'240'`, `'D'` …). `s` exposes `open … ohlc4`, `ta`, helpers of that timeframe. No lookahead: a higher-timeframe value becomes visible when its bar closes (`barmerge.lookahead_off`). Pass `{lookahead: true}` as third argument to opt in. |

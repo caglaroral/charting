@@ -259,10 +259,12 @@ fill(band, ma, {
 <div class="table-wrap"><table>
   <tr><th>Option</th><th>Values</th></tr>
   <tr><td><code>title</code></td><td>name in alerts and settings</td></tr>
-  <tr><td><code>location</code></td><td><code>abovebar</code> (default), <code>belowbar</code>, <code>top</code>, <code>bottom</code></td></tr>
+  <tr><td><code>location</code></td><td><code>abovebar</code> (default) / <code>belowbar</code>: above the bar high / below the bar low (on the price pane) or above / below the indicator's first plot (in its own pane); several shapes on one bar stack.<br><code>top</code> / <code>bottom</code>: fixed at the top / bottom edge of the pane, they do not move with the data.<br><code>absolute</code>: at the series value; pass numbers instead of booleans (<code>na</code> = no shape).</td></tr>
   <tr><td><code>shape</code> (alias <code>style</code>)</td><td><code>circle</code> (default), <code>triangleup</code>, <code>triangledown</code>, <code>arrowup</code>, <code>arrowdown</code>, <code>labelup</code>, <code>labeldown</code>, <code>square</code>, <code>diamond</code>, <code>cross</code>, <code>xcross</code>, <code>flag</code></td></tr>
   <tr><td><code>color</code></td><td>color, array or <code>i =&gt; color</code></td></tr>
-  <tr><td><code>text</code></td><td>short label next to the marker</td></tr>
+  <tr><td><code>text</code></td><td>short label next to the marker (inside the box for <code>labelup</code> / <code>labeldown</code>)</td></tr>
+  <tr><td><code>textcolor</code></td><td>text color (default: the shape color; white inside labels)</td></tr>
+  <tr><td><code>size</code></td><td><code>tiny</code>, <code>small</code>, <code>auto</code> (default), <code>normal</code>, <code>large</code>, <code>huge</code></td></tr>
 </table></div>
 
 <h2 id="colors">Colors</h2>

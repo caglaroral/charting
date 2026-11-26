@@ -137,12 +137,20 @@ export function runScript(code, bars, inputValues = {}, evaluator = defaultEvalu
       });
     },
     hline: (v, o = {}) => out.hlines.push({ value: Number(v), color: o.color || '#787b86', title: o.title || String(v) }),
-    plotshape: (cond, o = {}) => out.shapes.push({
-      k: keyFor(o.title, 'shape'), title: o.title || 'Shape', location: String(o.location || 'abovebar').toLowerCase(),
-      color: baseColor(o.color, '#2962ff'), colors: colorsFor(o.color),
-      shape: String(o.shape || o.style || 'circle').toLowerCase(), text: o.text || '',
-      data: main.toSeries(cond).map(Boolean),
-    }),
+    // location: abovebar | belowbar | top | bottom (fixed at the pane edge) | absolute (y = series value)
+    plotshape: (cond, o = {}) => {
+      const location = String(o.location || 'abovebar').toLowerCase().replace(/^location\./, '');
+      const raw = main.toSeries(cond);
+      out.shapes.push({
+        k: keyFor(o.title, 'shape'), title: o.title || 'Shape', location,
+        color: baseColor(o.color, '#2962ff'), colors: colorsFor(o.color),
+        shape: String(o.shape || o.style || 'circle').toLowerCase().replace(/^shape\./, ''), text: o.text || '',
+        textColor: o.textcolor || o.textColor || null,
+        size: String(o.size || 'auto').toLowerCase().replace(/^size\./, ''),
+        data: location === 'absolute' ? raw.map(v => v != null && v === v && v !== false) : raw.map(Boolean),
+        values: location === 'absolute' ? raw.map(v => (typeof v === 'number' && v === v ? v : null)) : undefined,
+      });
+    },
     // fill(a, b, {color}) shades the area between two series; color may be per bar (array / i => color).
     // Gradient form (Pine fill(p1, p2, top_value, bottom_value, top_color, bottom_color)):
     // fill(a, b, {topValue, bottomValue, topColor, bottomColor}); a null color end is transparent.
