@@ -181,3 +181,51 @@ test('TC-CHART-11 changing the timeframe keeps the date on screen (history is lo
   await expect.poll(() => page.evaluate(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return Math.round(r.to - (__app.S.view.length - 1)); })).toBe(6);
   await resetLayout(page);
 });
+
+test('TC-CHART-12 Go to: a date, a custom range, the calendar, errors', async ({ page }) => {
+  await resetLayout(page);
+  await page.evaluate(() => __app.setTf('1h'));
+  const tz = await page.evaluate(() => __app.S.tzOffset);
+  const visible = () => page.evaluate(() => {
+    const r = __app.chart.timeScale().getVisibleLogicalRange(), v = __app.S.view, o = __app.S.tzOffset;
+    const t = (l) => v[Math.max(0, Math.min(v.length - 1, Math.round(l)))].time - o;
+    return { from: t(r.from), to: t(r.to), mid: t((r.from + r.to) / 2) };
+  });
+  // Date: typed date and time (chart timezone) lands in the middle; history is loaded from ClickHouse
+  await page.keyboard.press('Alt+g');
+  await expect(page.locator('[data-testid=goto-at-date]')).toBeVisible();
+  await page.fill('[data-testid=goto-at-date]', '2026-09-20');
+  await page.fill('[data-testid=goto-at-time]', '12:00');
+  await page.click('[data-testid=goto-go]');
+  await expect(page.locator('.goto-modal')).toHaveCount(0, { timeout: 30_000 });
+  const target = Date.UTC(2026, 8, 20, 12) / 1000 - tz;
+  expect(Math.abs((await visible()).mid - target)).toBeLessThanOrEqual(3600);
+  // the calendar writes the date field; future days are disabled
+  await page.click('[data-testid=goto-btn]');
+  await page.click('[data-testid=cal-prev]');
+  const day = page.locator('.cal-day:not(:disabled)').nth(4); // the 5th of the previous month
+  const key = await day.getAttribute('data-day');
+  await day.click();
+  await expect(page.locator('[data-testid=goto-at-date]')).toHaveValue(key);
+  // Custom range: the range fills the screen
+  await page.click('[data-testid=goto-tab-range]');
+  await page.fill('[data-testid=goto-from-date]', '2026-09-10');
+  await page.fill('[data-testid=goto-from-time]', '00:00');
+  await page.fill('[data-testid=goto-to-date]', '2026-09-12');
+  await page.fill('[data-testid=goto-to-time]', '00:00');
+  await page.click('[data-testid=goto-go]');
+  await expect(page.locator('.goto-modal')).toHaveCount(0, { timeout: 30_000 });
+  const v = await visible();
+  expect(Math.abs(v.from - (Date.UTC(2026, 8, 10) / 1000 - tz))).toBeLessThanOrEqual(3600);
+  expect(Math.abs(v.to - (Date.UTC(2026, 8, 12) / 1000 - tz))).toBeLessThanOrEqual(3600);
+  // errors stay in the dialog
+  await page.click('[data-testid=goto-btn]');
+  await page.fill('[data-testid=goto-at-date]', '2026-02-30');
+  await page.click('[data-testid=goto-go]');
+  await expect(page.locator('[data-testid=goto-error]')).toContainText('YYYY-MM-DD');
+  await page.fill('[data-testid=goto-at-date]', '2099-01-01');
+  await page.click('[data-testid=goto-go]');
+  await expect(page.locator('[data-testid=goto-error]')).toContainText('future');
+  await page.keyboard.press('Escape');
+  await resetLayout(page);
+});

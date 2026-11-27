@@ -840,3 +840,117 @@ export function changePassword() {
     } }, 'Save')],
   });
 }
+
+// ======================================================================= go to (date / custom range)
+const pad2 = (n) => String(n).padStart(2, '0');
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Dates are handled as chart times: UTC fields of (UTC + the chart's timezone offset), like the bars.
+const ymd = (t) => { const d = new Date(t * 1000); return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`; };
+const hm = (t) => { const d = new Date(t * 1000); return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`; };
+function parseChartTime(date, time) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date.trim());
+  if (!m) return null;
+  const [h, mi] = /^\d{1,2}:\d{2}$/.test(time || '') ? time.split(':').map(Number) : [0, 0];
+  const t = Date.UTC(+m[1], +m[2] - 1, +m[3], h, mi) / 1000;
+  const d = new Date(t * 1000);
+  return d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? t : null; // rejects 2026-02-30
+}
+
+// Month calendar: days after `max` are disabled; onPick(ymd) when a day is clicked.
+function calendar({ max, onPick }) {
+  const root = el('div', { class: 'cal', 'data-testid': 'goto-cal' });
+  let y, m, selected = null;
+  const maxD = ymd(max);
+  const render = () => {
+    root.innerHTML = '';
+    const atMax = `${y}-${pad2(m + 1)}` >= maxD.slice(0, 7);
+    root.append(el('div', { class: 'cal-head' },
+      el('button', { class: 'cal-nav', title: 'Previous month', 'data-testid': 'cal-prev', onclick: () => { if (--m < 0) { m = 11; y--; } render(); } }, '‹'),
+      el('span', { 'data-testid': 'cal-month' }, `${MONTHS[m]} ${y}`),
+      el('button', { class: 'cal-nav', title: 'Next month', disabled: atMax, onclick: () => { if (++m > 11) { m = 0; y++; } render(); } }, '›')));
+    const grid = el('div', { class: 'cal-grid' }, ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => el('span', { class: 'cal-wd' }, d)));
+    const first = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7; // Monday first
+    for (let i = 0; i < first; i++) grid.append(el('span'));
+    const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    for (let d = 1; d <= days; d++) {
+      const key = `${y}-${pad2(m + 1)}-${pad2(d)}`;
+      grid.append(el('button', {
+        class: `cal-day ${key === selected ? 'sel' : ''} ${key === maxD ? 'today' : ''}`, disabled: key > maxD,
+        'data-day': key, onclick: () => { selected = key; onPick(key); render(); },
+      }, String(d)));
+    }
+    root.append(grid);
+  };
+  const show = (date) => {
+    const t = parseChartTime(date, '00:00') ?? max;
+    const d = new Date(t * 1000);
+    y = d.getUTCFullYear(); m = d.getUTCMonth(); selected = ymd(t);
+    render();
+  };
+  return { root, show };
+}
+
+export function goToDialog(app) {
+  const S = app.S;
+  const now = Math.floor(Date.now() / 1000) + S.tzOffset;
+  const daily = app.TF_SEC[S.tf] >= 86400; // no time of day on daily and higher timeframes
+  const r = app.chart.timeScale().getVisibleLogicalRange();
+  const at = (l) => S.view[Math.max(0, Math.min(S.view.length - 1, Math.round(l)))]?.time ?? now;
+  const field = (t, id) => {
+    const d = el('input', { class: 'goto-date', value: ymd(t), placeholder: 'YYYY-MM-DD', 'data-testid': `goto-${id}-date` });
+    const tm = el('input', { type: 'time', class: 'goto-time', value: daily ? '00:00' : hm(t), disabled: daily, 'data-testid': `goto-${id}-time` });
+    return { d, tm, row: el('div', { class: 'goto-row' }, d, tm) };
+  };
+  const one = field(now, 'at');
+  const from = field(r ? at(r.from) : now, 'from'), to = field(r ? at(r.to) : now, 'to');
+  let active = one.d; // the date field the calendar writes to
+  const cal = calendar({ max: now, onPick: (key) => { active.value = key; if (active === from.d) setActive(to.d); } });
+  const setActive = (inp) => {
+    active = inp;
+    for (const x of [from.d, to.d]) x.classList.toggle('focus', x === inp);
+    cal.show(inp.value);
+  };
+  for (const f of [one, from, to]) {
+    f.d.addEventListener('focus', () => setActive(f.d));
+    f.d.addEventListener('input', () => { if (parseChartTime(f.d.value, '00:00') != null) cal.show(f.d.value); });
+  }
+  const err = el('div', { class: 'err-box', hidden: true, 'data-testid': 'goto-error' });
+  const pDate = el('div', { class: 'goto-pane' }, one.row);
+  const pRange = el('div', { class: 'goto-pane', hidden: true },
+    el('label', { class: 'muted' }, 'From'), from.row, el('label', { class: 'muted' }, 'To'), to.row);
+  let mode = 'date';
+  const tabs = el('div', { class: 'goto-tabs' }, [['date', 'Date'], ['range', 'Custom range']].map(([k, label]) =>
+    el('button', { class: `goto-tab ${k === mode ? 'active' : ''}`, 'data-testid': `goto-tab-${k}`, onclick: (e) => {
+      mode = k;
+      for (const b of tabs.children) b.classList.toggle('active', b === e.currentTarget);
+      pDate.hidden = k !== 'date'; pRange.hidden = k !== 'range';
+      err.hidden = true;
+      setActive(k === 'date' ? one.d : from.d);
+    } }, label)));
+  const go = async () => {
+    err.hidden = true;
+    const t = (f) => parseChartTime(f.d.value, f.tm.value);
+    let a, b = null;
+    if (mode === 'date') a = t(one);
+    else { a = t(from); b = t(to); }
+    const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+    if (a == null || (mode === 'range' && b == null)) return fail('Enter dates as YYYY-MM-DD.');
+    if (b != null && b < a) [a, b] = [b, a];
+    if (a > now) return fail('That date is in the future.');
+    goBtn.disabled = true; goBtn.textContent = 'Loading…';
+    const msg = await app.goTo(a, b);
+    goBtn.disabled = false; goBtn.textContent = 'Go to';
+    if (msg) return fail(msg);
+    m.close();
+  };
+  for (const f of [one, from, to]) for (const x of [f.d, f.tm]) x.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  const goBtn = el('button', { class: 'btn primary', 'data-testid': 'goto-go', onclick: go }, 'Go to');
+  const m = modal({
+    title: 'Go to', width: '320px', cls: 'goto-modal',
+    body: el('div', {}, tabs, pDate, pRange, cal.root, err),
+    footer: [el('button', { class: 'btn ghost', onclick: () => m.close() }, 'Cancel'), goBtn],
+  });
+  setActive(one.d);
+  setTimeout(() => one.d.focus(), 0);
+}

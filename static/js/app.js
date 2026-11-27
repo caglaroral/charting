@@ -641,7 +641,26 @@ function viewAnchor() {
   return { time: S.view[i].time, width };
 }
 
-const MAX_ANCHOR_LOADS = 12;
+const MAX_ANCHOR_LOADS = 12; // ~180k bars at most (history chunks double up to 20000 bars)
+
+// Load history until the chart time `time` (timezone-shifted, like S.view) is loaded. False when it
+// could not be reached: no older data, or further back than MAX_ANCHOR_LOADS history loads.
+async function ensureHistory(time, token = loadToken) {
+  for (let k = 0; k < MAX_ANCHOR_LOADS && S.view.length && S.view[0].time > time && !S.exhausted; k++) {
+    const first = S.bars[0]?.time;
+    await loadMore({ refresh: false });
+    if (token !== loadToken || S.bars[0]?.time === first) break;
+  }
+  return !!S.view.length && S.view[0].time <= time;
+}
+
+// Index of the bar that contains the chart time: the last bar starting at or before it (0 if none).
+function barAt(time) {
+  let lo = 0, hi = S.view.length - 1;
+  if (hi < 0 || S.view[0].time > time) return 0;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (S.view[m].time <= time) lo = m; else hi = m - 1; }
+  return lo;
+}
 
 // After a timeframe change: show the same date in the middle, with the same number of bars on screen.
 // Older dates first need their history loaded (the chart starts with the latest bars).
@@ -652,20 +671,40 @@ async function applyAnchor({ time, width, offset }, token) {
     ts.setVisibleLogicalRange({ from: n - 1 + offset - width, to: n - 1 + offset });
     return;
   }
-  const want = time - (width / 2) * TF_SEC[S.tf];
-  for (let k = 0; k < MAX_ANCHOR_LOADS && S.view.length && S.view[0].time > want && !S.exhausted; k++) {
-    const first = S.bars[0]?.time;
-    await loadMore({ refresh: false });
-    if (token !== loadToken || S.bars[0]?.time === first) break;
-  }
+  await ensureHistory(time - (width / 2) * TF_SEC[S.tf], token);
   if (token !== loadToken || !S.view.length) return;
-  // the bar that contains the date: the last bar starting at or before it
-  let lo = 0, hi = S.view.length - 1;
-  if (S.view[0].time > time) hi = 0;
-  else while (lo < hi) { const m = (lo + hi + 1) >> 1; if (S.view[m].time <= time) lo = m; else hi = m - 1; }
-  const i = hi;
+  const i = barAt(time);
   ts.setVisibleLogicalRange({ from: i - width / 2, to: i + width / 2 });
 }
+
+// "Go to": a date (in the chart's timezone) in the middle of the screen, or a date range filling it.
+// Times are chart times (UTC + timezone offset, like S.view). Returns an error text or null.
+async function goTo(from, to = null) {
+  if (!S.view.length) return 'No data';
+  const token = loadToken, ts = app.chart.timeScale();
+  const r = ts.getVisibleLogicalRange();
+  const width = r ? r.to - r.from : 150;
+  const start = to == null ? from - (width / 2) * TF_SEC[S.tf] : from;
+  const before = S.bars.length;
+  const ok = await ensureHistory(start, token);
+  if (token !== loadToken) return null;
+  if (S.bars.length !== before) refreshIndicators();
+  if (!ok && S.view[0].time > (to ?? from)) {
+    return S.exhausted
+      ? `No ${TF_NAME[S.tf]} data before ${fmtTime(S.view[0].time)}.`
+      : `${fmtTime(from)} is too far back for the ${TF_NAME[S.tf]} timeframe; choose a higher timeframe.`;
+  }
+  if (to == null) {
+    const i = barAt(from);
+    ts.setVisibleLogicalRange({ from: i - width / 2, to: i + width / 2 });
+  } else {
+    const i0 = barAt(from), i1 = Math.max(i0, barAt(to));
+    ts.setVisibleLogicalRange({ from: i0 - 0.5, to: i1 + 0.5 });
+  }
+  return null;
+}
+app.goTo = goTo;
+
 app.setTf = setTf;
 
 let loadingMore = false;
@@ -1865,6 +1904,9 @@ function buildBottombar() {
     } }, rg[0]));
   }
   r.append(el('button', { class: 'bb-btn', title: 'Go to latest bar', onclick: () => app.scrollToRecent() }, '⇥'));
+  r.append(el('button', { class: 'bb-btn', title: 'Go to… (Alt+G)', 'data-testid': 'goto-btn', 'aria-label': 'Go to',
+    html: '<svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="3.5" width="13" height="12" rx="1.5"/><path d="M2.5 7h13M6 2v3M12 2v3M8 11h5M11 9l2 2-2 2"/></svg>',
+    onclick: () => dialogs.goToDialog(app) }));
   const tzWrap = $('#tz-select');
   const tzBtn = el('button', { class: 'bb-btn', id: 'tz-btn' });
   const renderTz = () => {
@@ -1910,6 +1952,7 @@ function bindKeys() {
     if (e.altKey && e.shiftKey && e.key === 'ArrowRight') { e.preventDefault(); app.scrollToRecent(); return; }
     if (app.dm.onKey(e)) { e.preventDefault(); return; }
     if (e.altKey && e.key.toLowerCase() === 'a') { e.preventDefault(); dialogs.alertDialog(app, { kind: 'price' }); return; }
+    if (e.altKey && e.key.toLowerCase() === 'g') { e.preventDefault(); dialogs.goToDialog(app); return; }
     if (e.key === '/' ) { e.preventDefault(); dialogs.indicatorPicker(app); return; }
     if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[a-z0-9]$/i.test(e.key)) {
       e.preventDefault();

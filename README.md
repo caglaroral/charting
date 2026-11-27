@@ -10,7 +10,7 @@ store and Binance as the live feed.
   body / border / wick colors, line color, background and grid (saved per user); TradingView-style
   pane controls (move up/down, also above the price pane, delete, collapse, maximize) with their own
   auto / log scale; "scroll to the most recent bar" button (Alt+Shift+→); changing the timeframe keeps
-  the date on screen.
+  the date on screen; **Go to** (calendar button in the bottom bar, `Alt+G`): a date or a custom range.
 - **Data**: live bars from one exchange REST call per selection plus one multiplexed websocket;
   older history is loaded from ClickHouse on scroll ("No data on ClickHouse" when there is none).
 - **Drawing tools**: every TradingView tool family except AI and icons — trend lines, channels,

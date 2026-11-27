@@ -45,6 +45,7 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-SCRIPT-07 | plotshape | Diamonds at location top / bottom, then scroll | Shapes at the pane top / bottom edge, they stay there while scrolling |
 | TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
 | TC-CHART-11 | Navigation | Center 20 Sep on 1D, switch to 4h and 15m; then at the latest bar switch to 1h | Same date in the middle, same number of bars on screen (history loaded as needed); at the latest bar the chart stays there |
+| TC-CHART-12 | Navigation | Go to (Alt+G / button): a date and time, a custom range, a calendar day, invalid / future date | Date in the middle; range fills the screen (history loaded); calendar fills the field; errors shown in the dialog |
 | TC-IND-08 | History | Load older bars with an indicator on the chart | Results stay aligned with their bars, legend unchanged |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
