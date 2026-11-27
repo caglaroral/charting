@@ -95,7 +95,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .legend .lg-sym { font-weight: 600; font-size: 15px; }
 .legend .lg-ohlc { font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .legend .lg-ohlc b { font-weight: 400; color: var(--muted); }
-.lg-ind { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 2px; pointer-events: auto; width: fit-content; padding: 1px 4px; border-radius: 3px; }
+.lg-ind { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; margin-top: 2px; pointer-events: auto; width: fit-content; padding: 1px 4px; border-radius: 3px; }
 .lg-ind:hover { background: rgba(19,23,34,.75); }
 .lg-ind .lg-name { color: var(--text); white-space: nowrap; }
 .lg-ind .lg-vals { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -105,7 +105,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .lg-ind .err { color: var(--down); }
 .lg-act { width: 20px; height: 20px; display: grid; place-items: center; background: var(--bg2); border: 0; border-radius: 3px; cursor: pointer; color: var(--text); padding: 0; }
 .lg-act:hover { background: var(--bg3); }
-.pane-legend { position: absolute; left: 8px; z-index: 5; pointer-events: none; }
+.pane-legend { position: absolute; left: 8px; z-index: 5; pointer-events: none; max-width: calc(100% - 90px); }
 .pane-ctrl-wrap { position: absolute; z-index: 5; }
 .pane-ctrls { display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
 .chartwrap:hover .pane-ctrls { opacity: .85; }
@@ -311,6 +311,24 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
   .editor-side { display: none; }
   .form-row > label:first-child { width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
+}
+
+/* Phones (portrait or landscape): one line per legend row, no long texts over the chart */
+@media (max-width: 600px), (max-height: 500px) {
+  .lg-ind { max-width: 100%; font-size: 11px; }
+  .lg-ind .lg-name { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; }
+  .lg-ind .lg-vals { flex-wrap: nowrap; overflow: hidden; min-width: 0; }
+  .pane-legend { max-width: calc(100% - 200px); } /* room for the pane buttons */
+}
+@media (max-width: 600px) {
+  .legend .lg-title { gap: 6px; }
+  .legend .lg-title > .muted { display: none; }
+  .legend .lg-ohlc { gap: 6px; font-size: 11px; }
+  .clock { display: none; }
+}
+@media (max-height: 500px) {
+  .lt-btn { height: 30px; }
+  .lt-sep { margin: 2px 0; }
 }
 
 /* Go to dialog */

@@ -245,7 +245,7 @@ function createChart() {
       if (t != null) app.dm.updateSelected({ text: t });
     },
     toast,
-    onZoom: (l0, l1) => { S.autoScale = true; applyScaleMode(); app.chart.timeScale().setVisibleLogicalRange({ from: l0, to: l1 }); },
+    onZoom: (l0, l1) => { S.autoScale = true; applyScaleMode(); setRange({ from: l0, to: l1 }); },
   });
   app.dm.setToolStyles(S.toolStyles);
   makeMainSeries();
@@ -257,7 +257,7 @@ function createChart() {
   });
   app.chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
     lastScroll = performance.now();
-    if (r && r.from < 30) loadMore();
+    if (r && r.from < 30 && !placing) loadMore();
   });
   new ResizeObserver(() => positionPaneLegends()).observe(container);
   const sb = el('div', { class: 'scale-btns', id: 'scale-btns' },
@@ -398,13 +398,17 @@ function setMainData(full = true) {
   }
 }
 
+// 10^-d as an exact decimal: Math.pow(10, -5) is 0.000009999999999999999, and with that minMove the chart
+// formats every price as 0.99999.
+const minMove = (d) => 1 / 10 ** d;
+
 function applyPriceFormat() {
   const recent = (S.view || S.bars).slice(-300);
   let d = decimalsOf(recent.flatMap(b => [b.open, b.close, b.high, b.low]));
   const last = recent.length ? recent[recent.length - 1].close : 1;
   if (d < 2 && last < 1000) d = 2;
   S.priceDecimals = d;
-  app.mainSeries?.applyOptions({ priceFormat: { type: 'price', precision: d, minMove: Math.pow(10, -d) } });
+  app.mainSeries?.applyOptions({ priceFormat: { type: 'price', precision: d, minMove: minMove(d) } });
   if (S.chartType === 'baseline' && S.bars.length) {
     app.mainSeries.applyOptions({ baseValue: { type: 'price', price: S.view[Math.max(0, S.view.length - 200)].close } });
   }
@@ -569,6 +573,21 @@ function lineBreakBars(bars, n = 3) {
 const toBar = (r) => ({ time: r[0] + S.tzOffset, open: r[1], high: r[2], low: r[3], close: r[4], volume: r[5] });
 
 let loadToken = 0;
+// Non-zero while the chart itself replaces data or series and positions the view: that briefly reports a
+// range at the first bar, which must not start a history load (it would race with the positioning).
+let placing = 0;
+const afterLayout = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+
+// The chart applies a new visible range only when it next lays out; until then it still reports the old
+// one. setRange remembers the requested range so code running before that layout reads what was set.
+let pendingRange = null;
+function setRange(r) {
+  const range = { from: r.from, to: r.to };
+  pendingRange = range;
+  app.chart.timeScale().setVisibleLogicalRange(range);
+  afterLayout(() => { if (pendingRange === range) pendingRange = null; });
+}
+const visibleRange = () => pendingRange || app.chart.timeScale().getVisibleLogicalRange();
 export async function setSymbol(symbol, { initial = false, tf = null, range = null, anchor = null } = {}) {
   if (!symbol) return;
   const token = ++loadToken;
@@ -580,6 +599,7 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
   renderTfButtons();
   setStatus('busy');
   showMsg('Loading…');
+  let held = false;
   try {
     closeStream();
     const provider = liveProvider(symbol);
@@ -596,6 +616,7 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     S.warned = false;
     if (provider) openStream(provider, symbol, S.tf, token);
     app.htfCache.clear();
+    placing++; held = true;
     applyPriceFormat();
     setMainData();
     fitPriceScaleOnce();
@@ -605,13 +626,20 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     const n = S.view.length;
     if (range) applyRange(range);
     else if (anchor) await applyAnchor(anchor, token);
-    else app.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 150), to: n + 10 });
+    else setRange({ from: Math.max(0, n - 150), to: n + 10 });
+    held = false;
+    afterLayout(() => { // the chart applies the new range when it next lays out
+      placing--;
+      const r = visibleRange();
+      if (token === loadToken && r && r.from < 30) loadMore(); // the chart was placed at the first bar
+    });
     if (token !== loadToken) return;
     await refreshIndicators(true);
     if (token !== loadToken) return;
     updateLegendValues(null);
     setStatus('ok');
   } catch (e) {
+    if (held) placing--;
     if (token !== loadToken) return;
     setStatus('err', e.message);
     showMsg('Failed to load data: ' + e.message);
@@ -633,7 +661,7 @@ export async function setTf(tf) {
 // the latest bar is on screen, then the chart stays at the latest bar), how many bars fit on the screen
 // and the space right of the latest bar.
 function viewAnchor() {
-  const r = app.chart.timeScale().getVisibleLogicalRange(), n = S.view.length;
+  const r = visibleRange(), n = S.view.length;
   if (!r || !n) return null;
   const width = r.to - r.from;
   if (r.to >= n - 1) return { time: null, width, offset: r.to - (n - 1) };
@@ -665,24 +693,23 @@ function barAt(time) {
 // After a timeframe change: show the same date in the middle, with the same number of bars on screen.
 // Older dates first need their history loaded (the chart starts with the latest bars).
 async function applyAnchor({ time, width, offset }, token) {
-  const ts = app.chart.timeScale();
   if (time == null) {
     const n = S.view.length;
-    ts.setVisibleLogicalRange({ from: n - 1 + offset - width, to: n - 1 + offset });
+    setRange({ from: n - 1 + offset - width, to: n - 1 + offset });
     return;
   }
   await ensureHistory(time - (width / 2) * TF_SEC[S.tf], token);
   if (token !== loadToken || !S.view.length) return;
   const i = barAt(time);
-  ts.setVisibleLogicalRange({ from: i - width / 2, to: i + width / 2 });
+  setRange({ from: i - width / 2, to: i + width / 2 });
 }
 
 // "Go to": a date (in the chart's timezone) in the middle of the screen, or a date range filling it.
 // Times are chart times (UTC + timezone offset, like S.view). Returns an error text or null.
 async function goTo(from, to = null) {
   if (!S.view.length) return 'No data';
-  const token = loadToken, ts = app.chart.timeScale();
-  const r = ts.getVisibleLogicalRange();
+  const token = loadToken;
+  const r = visibleRange();
   const width = r ? r.to - r.from : 150;
   const start = to == null ? from - (width / 2) * TF_SEC[S.tf] : from;
   const before = S.bars.length;
@@ -696,10 +723,10 @@ async function goTo(from, to = null) {
   }
   if (to == null) {
     const i = barAt(from);
-    ts.setVisibleLogicalRange({ from: i - width / 2, to: i + width / 2 });
+    setRange({ from: i - width / 2, to: i + width / 2 });
   } else {
     const i0 = barAt(from), i1 = Math.max(i0, barAt(to));
-    ts.setVisibleLogicalRange({ from: i0 - 0.5, to: i1 + 0.5 });
+    setRange({ from: i0 - 0.5, to: i1 + 0.5 });
   }
   return null;
 }
@@ -756,14 +783,13 @@ async function loadMoreNow({ refresh = true } = {}) {
     if (gap > TF_SEC[S.tf] * 1.5) {
       toast(`ClickHouse data ends at ${fmtTime(older[older.length - 1].time)}; there is a gap of ${Math.round(gap / TF_SEC[S.tf])} bars up to the live data.`, 'info', 'Data gap', 7000);
     }
-    const ts = app.chart.timeScale();
-    const r = ts.getVisibleLogicalRange();
+    const r = visibleRange();
     const before = S.view.length;
     S.bars = older.concat(S.bars);
     refreshView();
     setMainData();
     const added = S.view.length - before;
-    if (r) ts.setVisibleLogicalRange({ from: r.from + added, to: r.to + added });
+    if (r) setRange({ from: r.from + added, to: r.to + added });
     app.dm.update();
     if (refresh) refreshAfterScroll(); // indicators follow once the user stops scrolling (results stay aligned meanwhile)
   } catch (e) {
@@ -864,7 +890,7 @@ function applyRange([, , span]) {
   else from = last - span;
   let i = S.view.findIndex(b => b.time >= from);
   if (i < 0) i = 0;
-  app.chart.timeScale().setVisibleLogicalRange({ from: i, to: n + 3 });
+  setRange({ from: i, to: n + 3 });
 }
 
 // ======================================================================= indicators
@@ -1332,11 +1358,15 @@ function paneFormat(res) {
     d = m >= 1 ? 2 : Math.min(8, Math.ceil(-Math.log10(m)) + 2);
   }
   d = Math.max(0, Math.min(10, Math.round(d)));
-  return { type: 'price', precision: d, minMove: Math.pow(10, -d) };
+  return { type: 'price', precision: d, minMove: minMove(d) };
 }
 
 function rebuildIndicatorSeries(items) {
-  const c = app.chart;
+  const c = app.chart, range = visibleRange();
+  // Re-creating the series moves the chart to the first bars; that must not start a history load, and
+  // the screen keeps its range.
+  placing++;
+  afterLayout(() => placing--);
   clearIndicatorSeries();
   let paneIdx = 0;
   for (const { inst, res } of items) {
@@ -1350,7 +1380,7 @@ function rebuildIndicatorSeries(items) {
     for (const p of res.plots) {
       const common = { priceScaleId: scaleId, lastValueVisible: !res.volume, priceLineVisible: false, title: '', crosshairMarkerVisible: false }; // no dots on the crosshair
       if (!res.volume && !res.overlay) common.priceFormat = paneFormat(res);
-      if (res.overlay && !res.volume) common.priceFormat = { type: 'price', precision: S.priceDecimals, minMove: Math.pow(10, -S.priceDecimals) };
+      if (res.overlay && !res.volume) common.priceFormat = { type: 'price', precision: S.priceDecimals, minMove: minMove(S.priceDecimals) };
       if (res.volume) common.priceFormat = { type: 'volume' };
       let s;
       p.mode = plotMode(p);
@@ -1389,6 +1419,7 @@ function rebuildIndicatorSeries(items) {
   app.ind.mainAt = Math.max(0, Math.min(S.mainPos || 0, paneIdx));
   if (!app.ind.items.some(x => x.inst.id === app.maxPane && x.own)) app.maxPane = null;
   placeMainPane();
+  if (range) setRange(range);
 }
 
 // Panes created in this tick are not known to the chart model until it lays them out
@@ -1687,7 +1718,7 @@ function buildTopbar() {
         const wasTransformed = TRANSFORMED.has(S.chartType);
         S.chartType = k; renderCt(); refreshView(); makeMainSeries(); setMainData(); app.ind.sig = null;
         refreshIndicators(true); app.dm.update(); app.saveLayout();
-        if (wasTransformed || TRANSFORMED.has(k)) app.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, S.view.length - 150), to: S.view.length + 10 });
+        if (wasTransformed || TRANSFORMED.has(k)) setRange({ from: Math.max(0, S.view.length - 150), to: S.view.length + 10 });
       },
     })),
   ]));

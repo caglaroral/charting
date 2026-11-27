@@ -1,5 +1,6 @@
 // TC-CHART: live data, timeframes, chart types, timezone, scale, history from ClickHouse
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
 import { login, trackErrors, resetLayout } from '../helpers.js';
 
 test.beforeEach(async ({ page }) => { await login(page); });
@@ -182,6 +183,32 @@ test('TC-CHART-11 changing the timeframe keeps the date on screen (history is lo
   await resetLayout(page);
 });
 
+test('TC-CHART-13 timeframe switch with a script pane: indicator rebuild does not move the chart or load history', async ({ page }) => {
+  const sid = await page.evaluate(async (code) => (await (await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SqueezeWt e2e', code }) })).json()).script.id,
+    fs.readFileSync(new URL('../../../examples/squeezewt.js', import.meta.url), 'utf8'));
+  const layout = { symbol: 'BINANCE:BTCUSDT', tf: '1h', indicators: [{ id: 'sqz', type: 'custom', script_id: sid, params: {}, colors: {}, visible: true }] };
+  await page.evaluate((v) => fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }), layout);
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.view.length > 50 && __app.ind.items.length === 1 && __app.ind.items[0].res.plots);
+  await page.waitForTimeout(1000);
+  const view = () => page.evaluate(() => {
+    const r = __app.chart.timeScale().getVisibleLogicalRange();
+    return { t: __app.S.view[Math.round((r.from + r.to) / 2)].time, w: Math.round(r.to - r.from), n: __app.S.view.length };
+  });
+  await page.evaluate(() => { const n = __app.S.view.length; __app.chart.timeScale().setVisibleLogicalRange({ from: n - 131, to: n - 11 }); });
+  await page.waitForTimeout(300); // the chart applies a range on its next frame
+  const before = await view();
+  await page.click('.tf-btn[data-tf="15m"]');
+  await page.waitForFunction(() => __app.S.tf === '15m' && __app.ind.items[0]?.series.length);
+  await page.waitForTimeout(3000); // removing the indicator series reported a range at the first bars, which loaded history
+  const after = await view();
+  expect(Math.abs(after.t - before.t)).toBeLessThanOrEqual(3600);
+  expect(after.w).toBe(before.w);
+  expect(after.n).toBeLessThanOrEqual(1500); // only the initial bars, no history load
+  await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), sid);
+  await resetLayout(page);
+});
+
 test('TC-CHART-12 Go to: a date, a custom range, the calendar, errors', async ({ page }) => {
   await resetLayout(page);
   await page.evaluate(() => __app.setTf('1h'));
@@ -228,4 +255,29 @@ test('TC-CHART-12 Go to: a date, a custom range, the calendar, errors', async ({
   await expect(page.locator('[data-testid=goto-error]')).toContainText('future');
   await page.keyboard.press('Escape');
   await resetLayout(page);
+});
+
+test.describe('phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test('TC-CHART-14 phone layout: one-line legends clear of the pane buttons; 4-5 decimal prices', async ({ page }) => {
+    const sid = await page.evaluate(async (code) => (await (await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SqueezeWt e2e', code }) })).json()).script.id,
+      fs.readFileSync(new URL('../../../examples/squeezewt.js', import.meta.url), 'utf8'));
+    const layout = { symbol: 'BINANCE:DOGEUSDT', tf: '1h', indicators: [{ id: 'sqz', type: 'custom', script_id: sid, params: {}, colors: {}, visible: true }] };
+    await page.evaluate((v) => fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }), layout);
+    await page.reload();
+    await page.waitForFunction(() => window.__app && __app.S.view.length > 50 && __app.ind.items[0]?.res.plots && document.querySelector('.pane-legend .lg-ind'));
+    await page.waitForTimeout(500);
+    const box = await page.evaluate(() => {
+      const r = (q) => document.querySelector(q).getBoundingClientRect();
+      return { ind: r('.pane-legend .lg-ind'), ctrl: r('.pane-ctrl-wrap'), decimals: __app.S.priceDecimals, last: __app.S.view.at(-1).close,
+        shown: __app.mainSeries.priceFormatter().format(__app.S.view.at(-1).close) };
+    });
+    expect(box.ind.height).toBeLessThan(24); // values stay on one line
+    expect(box.ind.right).toBeLessThanOrEqual(box.ctrl.left);
+    // 10^-4 / 10^-5 as minMove used to format every price as 0.99999
+    expect(box.decimals).toBeGreaterThanOrEqual(4);
+    expect(Number(box.shown)).toBeCloseTo(box.last, box.decimals - 1);
+    await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), sid);
+    await resetLayout(page);
+  });
 });

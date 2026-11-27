@@ -46,6 +46,8 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
 | TC-CHART-11 | Navigation | Center 20 Sep on 1D, switch to 4h and 15m; then at the latest bar switch to 1h | Same date in the middle, same number of bars on screen (history loaded as needed); at the latest bar the chart stays there |
 | TC-CHART-12 | Navigation | Go to (Alt+G / button): a date and time, a custom range, a calendar day, invalid / future date | Date in the middle; range fills the screen (history loaded); calendar fills the field; errors shown in the dialog |
+| TC-CHART-13 | Navigation | Script in its own pane, 1h mid-history, switch to 15m | Same date and width; re-creating the indicator series neither moves the chart to the first bars nor loads history |
+| TC-CHART-14 | Phone | 390×844 touch viewport, script pane, 5-decimal symbol (DOGEUSDT) | Indicator legend on one line and clear of the pane buttons; prices formatted correctly (not 0.99999) |
 | TC-IND-08 | History | Load older bars with an indicator on the chart | Results stay aligned with their bars, legend unchanged |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
 | TC-WL-01 | Watchlist | Add a symbol, wait, reload, remove | Live quote appears, persisted, removed |
@@ -64,7 +66,7 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-SCRIPT-01 | ChartScript | New script from template, Run, Save & add | Run summary, indicator on chart with inputs in legend |
 | TC-SCRIPT-02 | ChartScript | Reference error on line 3 | Error box with message and `line 3` |
 | TC-SCRIPT-03 | Sandbox | Infinite loop; probe `document`/`parent`; `fetch` | Timeout without freezing the page; no DOM access; network blocked |
-| TC-SCRIPT-04 | Pine port | SqueezeWt | Own pane, 13 plots, 2 signals, legend identical to TradingView, histogram drawn with 4px bars like Pine |
+| TC-SCRIPT-04 | Pine port | SqueezeWt | Own pane, 13 plots, 2 signals, legend identical to TradingView, histogram drawn with 4px bars like Pine, each bar in its own color (probed with the other plots hidden) |
 | TC-SCRIPT-05 | Pine port | ALL SMAs (4H `security()`, `fill()`) | Overlay, 4H MA populated, gradient fill present |
 | TC-ALERT-01 | Alerts | Price alert from toolbar, toggle, delete | Listed, alert line on chart, paused, deleted |
 | TC-ALERT-02 | Alerts | Alert on a horizontal line | Drawing alert stored, bell marker on the drawing |

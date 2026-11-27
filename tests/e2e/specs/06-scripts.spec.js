@@ -69,6 +69,9 @@ test('TC-SCRIPT-04 SqueezeWt port renders in its own pane with signals', async (
   expect(hist).toEqual({ type: 'Custom', w: 4 });
   // ... in each bar's own color (green / maroon / magenta / lime), not the plot's default color
   await page.mouse.move(5, 5);
+  // probe the histogram alone: the other plots (the translucent WT area, lines) may cover a bar
+  await page.evaluate(() => __app.ind.items.find(i => i.res.name === 'SqueezeWt').series.slice(1).forEach(s => s.applyOptions({ visible: false })));
+  await page.waitForTimeout(300); // let the chart paint
   const px = await page.evaluate(() => {
     const it = __app.ind.items.find(i => i.res.name === 'SqueezeWt');
     const p = it.res.plots[0], s = it.series[0], off = __app.S.view.length - p.data.length;
@@ -89,10 +92,10 @@ test('TC-SCRIPT-04 SqueezeWt port renders in its own pane with signals', async (
     }
     return out;
   });
+  await page.evaluate(() => __app.ind.items.find(i => i.res.name === 'SqueezeWt').series.slice(1).forEach(s => s.applyOptions({ visible: true })));
   expect(px.length).toBeGreaterThan(2);
-  // other plots (the translucent WT area, lines) may cover a bar: most probes must show the bar color
   const ok = px.filter(({ want, got }) => got && got.every((v, j) => Math.abs(v - want[j]) < 40)).length;
-  expect(ok).toBeGreaterThanOrEqual(px.length - 2);
+  expect(ok).toBe(px.length);
   await expect(page.locator('.pane-legend')).toContainText('SqueezeWt 20 2 20 1.5 14 3 3 3 14 14 close 60 21 14 1.9 -1.3 10 21 0.015 60 53 -60 -53');
   await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), r.id);
   expect(errors).toEqual([]);
