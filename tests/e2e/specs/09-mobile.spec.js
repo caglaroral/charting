@@ -14,6 +14,15 @@ test('TC-MOBILE-01 phone layout: tab bar, panels, menu, timeframe list', async (
   expect(await page.evaluate(() => document.body.classList.contains('mobile'))).toBe(true);
   for (const sel of ['#lefttools', '.bottombar', '#btn-editor', '#user-menu', '.tf-group']) expect(await visible(page, sel), sel).toBe(false);
   for (const sel of ['#tabbar', '[data-testid=m-menu]', '[data-testid=tf-more]']) expect(await visible(page, sel), sel).toBe(true);
+  // every tab icon is inside the bar and on top (nothing, e.g. the chart, paints over it)
+  const icons = await page.evaluate(() => {
+    const bar = document.querySelector('#tabbar').getBoundingClientRect();
+    return [...document.querySelectorAll('.tab-btn svg')].map(svg => {
+      const r = svg.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      return { inside: r.top >= bar.top && r.bottom <= bar.bottom, top: !!document.elementFromPoint(x, y)?.closest('.tab-btn') };
+    });
+  });
+  expect(icons).toEqual(Array(4).fill({ inside: true, top: true }));
   await expect(page.locator('#m-tf')).toHaveText(await page.evaluate(() => ({ '1D': 'D', '1W': 'W', '1M': 'M' })[__app.S.tf] || __app.S.tf));
   // timeframe list from the current timeframe button
   await page.tap('[data-testid=tf-more]');

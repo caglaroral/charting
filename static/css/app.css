@@ -357,7 +357,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .m-only, .m-tf { display: none; }
 body.mobile .m-only { display: flex; }
 body.mobile { --m-top: 44px; --m-tab: 54px; }
-body.mobile .app { grid-template-columns: 1fr; grid-template-rows: var(--m-top) 1fr var(--m-tab); grid-template-areas: "top" "chart" "tabbar"; height: 100dvh; }
+body.mobile .app { grid-template-columns: 1fr; grid-template-rows: var(--m-top) minmax(0, 1fr) var(--m-tab); grid-template-areas: "top" "chart" "tabbar"; height: 100dvh; }
 body.mobile .lefttools, body.mobile .bottombar, body.mobile .rightpanel { display: none; }
 body.mobile .topbar { gap: 0; padding: 0 2px; }
 body.mobile .topbar > .sep, body.mobile .tf-group, body.mobile #btn-editor, body.mobile #btn-alert, body.mobile #btn-undo, body.mobile #btn-redo,
@@ -371,9 +371,12 @@ body.mobile .status-dot { margin: 0 6px; }
 /* Watchlist / Alerts: the right panel over the chart */
 body.mobile .app.m-panel .rightpanel { display: flex; position: fixed; top: var(--m-top); bottom: var(--m-tab); left: 0; right: 0; z-index: 60; background: var(--bg); border-left: 0; }
 body.mobile .rp-tabs { display: none; }
+body.mobile .chartwrap { overflow: hidden; }
 body.mobile .drawbar { top: 8px; max-width: calc(100% - 16px); overflow-x: auto; scrollbar-width: none; }
 
-.tabbar { grid-area: tabbar; align-items: stretch; border-top: 1px solid var(--border); background: var(--bg); padding-bottom: env(safe-area-inset-bottom); }
+/* no safe-area padding: without viewport-fit=cover the browser keeps the page out of it already, and a padding
+   inside the fixed-height bar pushed the icons under the chart on phones with a navigation bar */
+.tabbar { grid-area: tabbar; position: relative; z-index: 30; align-items: stretch; border-top: 1px solid var(--border); background: var(--bg); overflow: hidden; }
 .tab-btn { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: none; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; }
 .tab-btn.active { color: var(--accent); }
 .tab-badge { position: absolute; top: 4px; left: calc(50% + 6px); }
@@ -383,7 +386,7 @@ body.mobile .drawbar { top: 8px; max-width: calc(100% - 16px); overflow-x: auto;
 }
 
 .m-sheet-backdrop { position: fixed; inset: 0; z-index: 1500; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; }
-.m-sheet { width: 100%; max-height: 80dvh; display: flex; flex-direction: column; background: var(--bg2); border-radius: 12px 12px 0 0; box-shadow: 0 -8px 24px rgba(0,0,0,.5); animation: sheetin .18s ease-out; padding-bottom: env(safe-area-inset-bottom); }
+.m-sheet { width: 100%; max-height: 80dvh; display: flex; flex-direction: column; background: var(--bg2); border-radius: 12px 12px 0 0; box-shadow: 0 -8px 24px rgba(0,0,0,.5); animation: sheetin .18s ease-out; }
 @keyframes sheetin { from { transform: translateY(40px); opacity: .4; } }
 .m-sheet-head { display: flex; align-items: center; padding: 12px 8px 8px 16px; font-weight: 600; font-size: 15px; border-bottom: 1px solid var(--border); }
 .m-sheet-x { margin-left: auto; width: 36px; height: 36px; display: grid; place-items: center; background: none; border: 0; color: var(--muted); cursor: pointer; }
