@@ -183,29 +183,41 @@ test('TC-CHART-11 changing the timeframe keeps the date on screen (history is lo
   await resetLayout(page);
 });
 
-test('TC-CHART-13 timeframe switch with a script pane: indicator rebuild does not move the chart or load history', async ({ page }) => {
-  const sid = await page.evaluate(async (code) => (await (await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SqueezeWt e2e', code }) })).json()).script.id,
-    fs.readFileSync(new URL('../../../examples/squeezewt.js', import.meta.url), 'utf8'));
-  const layout = { symbol: 'BINANCE:BTCUSDT', tf: '1h', indicators: [{ id: 'sqz', type: 'custom', script_id: sid, params: {}, colors: {}, visible: true }] };
+test('TC-CHART-13 timeframe switches with script panes keep the date (or the latest bar)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const ex = (f) => fs.readFileSync(new URL(`../../../examples/${f}`, import.meta.url), 'utf8');
+  const ids = [];
+  for (const f of ['all-smas.js', 'squeezewt.js']) {
+    ids.push(await page.evaluate(async (code) => (await (await fetch('/api/scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'TF e2e', code }) })).json()).script.id, ex(f)));
+  }
+  const layout = { symbol: 'BINANCE:BTCUSDT', tf: '1h', indicators: ids.map((id, k) => ({ id: 'i' + k, type: 'custom', script_id: id, params: {}, colors: {}, visible: true })) };
   await page.evaluate((v) => fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }), layout);
   await page.reload();
-  await page.waitForFunction(() => window.__app && __app.S.view.length > 50 && __app.ind.items.length === 1 && __app.ind.items[0].res.plots);
-  await page.waitForTimeout(1000);
+  const settled = (tf) => page.waitForFunction((tf) => __app.S.tf === tf && __app.ind.items.length === 2 && __app.ind.items.every(i => i.res.plots && i.series.length), tf);
+  await settled('1h');
   const view = () => page.evaluate(() => {
-    const r = __app.chart.timeScale().getVisibleLogicalRange();
-    return { t: __app.S.view[Math.round((r.from + r.to) / 2)].time, w: Math.round(r.to - r.from), n: __app.S.view.length };
+    const r = __app.chart.timeScale().getVisibleLogicalRange(), n = __app.S.view.length;
+    return { t: __app.S.view[Math.round((r.from + r.to) / 2)].time, w: r.to - r.from, off: r.to - (n - 1), n };
   });
-  await page.evaluate(() => { const n = __app.S.view.length; __app.chart.timeScale().setVisibleLogicalRange({ from: n - 131, to: n - 11 }); });
-  await page.waitForTimeout(300); // the chart applies a range on its next frame
-  const before = await view();
-  await page.click('.tf-btn[data-tf="15m"]');
-  await page.waitForFunction(() => __app.S.tf === '15m' && __app.ind.items[0]?.series.length);
-  await page.waitForTimeout(3000); // removing the indicator series reported a range at the first bars, which loaded history
-  const after = await view();
-  expect(Math.abs(after.t - before.t)).toBeLessThanOrEqual(3600);
-  expect(after.w).toBe(before.w);
-  expect(after.n).toBeLessThanOrEqual(1500); // only the initial bars, no history load
-  await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), sid);
+  // [mode, from, to]: mid = 100 bars in the middle of the history, edge = at the latest bar
+  const cases = [['mid', '1h', '15m'], ['mid', '15m', '4h'], ['mid', '4h', '1D'], ['mid', '1D', '1W'], ['edge', '1W', '1D'], ['edge', '1D', '5m'], ['edge', '5m', '15m'], ['edge', '15m', '1h']];
+  for (const [mode, from, to] of cases) {
+    await page.evaluate((x) => __app.setTf(x), from);
+    await settled(from);
+    await page.evaluate((m) => { const n = __app.S.view.length; __app.chart.timeScale().setVisibleLogicalRange(m === 'mid' ? { from: n - 200, to: n - 100 } : { from: n - 90, to: n + 10 }); }, mode);
+    await page.waitForTimeout(300); // the chart applies a range on its next frame
+    const a = await view();
+    await page.evaluate((x) => __app.setTf(x), to);
+    await settled(to);
+    await page.waitForTimeout(2500); // indicator updates moved the view to the first bars, which loaded history there
+    const b = await view(), sec = Math.max(...await page.evaluate(([x, y]) => [__app.TF_SEC[x], __app.TF_SEC[y]], [from, to]));
+    const msg = `${mode} ${from} -> ${to}`;
+    expect(Math.abs(b.w - a.w), msg).toBeLessThanOrEqual(1);
+    if (mode === 'mid') expect(Math.abs(b.t - a.t), msg).toBeLessThanOrEqual(sec);
+    else expect(Math.abs(b.off - a.off), msg).toBeLessThanOrEqual(1);
+    if (mode === 'edge') expect(b.n, msg).toBeLessThanOrEqual(1500); // no history load
+  }
+  for (const id of ids) await page.evaluate((id) => fetch('/api/scripts/' + id, { method: 'DELETE' }), id);
   await resetLayout(page);
 });
 

@@ -46,7 +46,7 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-CHART-10 | Navigation | Scroll back; » button; Alt+Shift+→ | Button shows only when the last bar is off screen, both return to it |
 | TC-CHART-11 | Navigation | Center 20 Sep on 1D, switch to 4h and 15m; then at the latest bar switch to 1h | Same date in the middle, same number of bars on screen (history loaded as needed); at the latest bar the chart stays there |
 | TC-CHART-12 | Navigation | Go to (Alt+G / button): a date and time, a custom range, a calendar day, invalid / future date | Date in the middle; range fills the screen (history loaded); calendar fills the field; errors shown in the dialog |
-| TC-CHART-13 | Navigation | Script in its own pane, 1h mid-history, switch to 15m | Same date and width; re-creating the indicator series neither moves the chart to the first bars nor loads history |
+| TC-CHART-13 | Navigation | ALL SMAs + SqueezeWt panes; switches mid-history (1h→15m→4h→1D→1W) and at the latest bar (1W→1D→5m→15m→1h) | Same date in the middle (or still at the latest bar), same width; no history load at the latest bar |
 | TC-CHART-14 | Phone | 390×844 touch viewport, script pane, 5-decimal symbol (DOGEUSDT) | Indicator legend on one line and clear of the pane buttons; prices formatted correctly (not 0.99999) |
 | TC-IND-08 | History | Load older bars with an indicator on the chart | Results stay aligned with their bars, legend unchanged |
 | TC-CHART-09 | Chart settings | Change body/wick colors, save, reload; Cancel; Defaults | Colors applied live and persisted, Cancel reverts, Defaults restores |
@@ -76,6 +76,8 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-ALERT-06 | History | Price alert with a failing webhook fires | Log has created, triggered, delivered (in-app), failed (webhook, with error), stopped, deleted; tab and dialog filters show it |
 | TC-ALERT-07 | Lines | Trend line extended right, chart on log scale, "less than" alert | The server fires: the level is computed in log price and beyond the line's points (linear or not extended would not fire) |
 | TC-ALERT-08 | Timeframe | Open the alert dialog; closed above on "Chart", closed below on 4h; edit | List starts with "Chart (1 hour)" (default) and has the symbol's timeframes; alerts saved with 1h / 4h; editing shows the alert's timeframe |
+| TC-MOBILE-01 | Phone | 390×844 touch: toolbars, timeframe list, Watchlist / Alerts tabs, ☰ menu | Tab bar and ☰ instead of the toolbars; the panel covers the chart and a watchlist pick returns to it; scale toggles and Go to in the menu |
+| TC-MOBILE-02 | Phone | Draw tab → Trend Line, two taps; Horizontal Line → cancel | Sheet closes, tool bar shows the tool, the line is drawn; cancel returns to the cursor |
 | TC-ADMIN-01 | Data sources | Edit source, Test connection, Scan tables | Connected, OHLC tables listed |
 | TC-ADMIN-02 | Admin | Plans and Users dialogs; non-admin menu | Limits shown, plan assigned, no admin menu for users |
 | TC-PERSIST-01 | Workspace | Change symbol, timeframe, chart type, indicators, draw; logout/login | Everything restored |

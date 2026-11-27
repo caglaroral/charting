@@ -7,6 +7,7 @@ import { ScriptSandbox } from './sandbox.js';
 import { restKlines, klineStream, PROVIDERS, connectionCount } from './live.js';
 import { initPanels } from './panels.js';
 import * as dialogs from './dialogs.js';
+import { initMobile, renderDrawToolbar } from './mobile.js';
 
 const LWC = window.LightweightCharts;
 
@@ -195,6 +196,7 @@ async function start() {
   buildLeftTools();
   buildBottombar();
   initPanels(app);
+  initMobile(app, { GROUPS, TOOLS, toolIcon: TOOL_ICON_FOR, svg, renderLeftActive, applyScaleMode, screenshot, userMenuItems, dialogs });
   bindKeys();
   if (!S.symbol) {
     showMsg(S.user.is_admin ? 'No data source yet. User menu → Data Sources' : 'No data source configured. Contact your administrator.');
@@ -238,7 +240,7 @@ function createChart() {
     getBars: () => S.view || S.bars, tfSec: () => TF_SEC[S.tf], tz: () => S.tzOffset, symbol: () => S.symbol,
     fmtPrice: (p) => app.fmtPrice(p), fmtTime: (t) => fmtTime(t, TF_SEC[S.tf] < 86400),
     magnet: () => S.magnet, keepDrawing: () => S.keepDrawing,
-    onSelect: (d) => renderDrawbar(d), onToolChange: () => renderLeftActive(),
+    onSelect: (d) => renderDrawbar(d), onToolChange: () => { renderLeftActive(); renderDrawToolbar(); },
     onToolStyles: (map) => api.setSetting('drawingStyles', map).catch(e => toast('Failed to save the drawing style: ' + e.message, 'error')),
     editText: async (d) => {
       const t = await dialogs.promptText('Text', d.text || '');
@@ -580,10 +582,11 @@ const afterLayout = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn
 
 // The chart applies a new visible range only when it next lays out; until then it still reports the old
 // one. setRange remembers the requested range so code running before that layout reads what was set.
-let pendingRange = null;
+let pendingRange = null, rangeSeq = 0;
 function setRange(r) {
   const range = { from: r.from, to: r.to };
   pendingRange = range;
+  rangeSeq++;
   app.chart.timeScale().setVisibleLogicalRange(range);
   afterLayout(() => { if (pendingRange === range) pendingRange = null; });
 }
@@ -617,6 +620,9 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
     if (provider) openStream(provider, symbol, S.tf, token);
     app.htfCache.clear();
     placing++; held = true;
+    // The chart numbers bars over the times of all series: indicator series still holding the previous
+    // symbol's / timeframe's times would shift every position, and their update would move the view.
+    for (const it of app.ind.items) for (const s of it.series) s.setData([]);
     applyPriceFormat();
     setMainData();
     fitPriceScaleOnce();
@@ -634,7 +640,7 @@ export async function setSymbol(symbol, { initial = false, tf = null, range = nu
       if (token === loadToken && r && r.from < 30) loadMore(); // the chart was placed at the first bar
     });
     if (token !== loadToken) return;
-    await refreshIndicators(true);
+    await refreshIndicators('data'); // new bars, same indicators: re-creating the series would move the chart
     if (token !== loadToken) return;
     updateLegendValues(null);
     setStatus('ok');
@@ -1000,6 +1006,8 @@ function sigOf(items) {
   return items.map(({ inst, res }) => [inst.id, inst.visible ? 1 : 0, res.error ? 'e' : `${res.overlay ? 1 : 0}${res.volume ? 'v' : ''}:${res.plots.map(p => p.k + p.style).join(',')}:${res.hlines.length}:${res.shapes.length}:${(res.fills || []).length}`].join('/')).join('|') + '#' + S.chartType;
 }
 
+// force: true re-creates the indicator series; 'data' sends every series its full data (after a symbol or
+// timeframe load: the bars changed, the indicators did not).
 export async function refreshIndicators(force = false) {
   const token = ++app.ind.token;
   const insts = S.indicators;
@@ -1014,14 +1022,14 @@ export async function refreshIndicators(force = false) {
   const items = insts.map((inst, i) => ({ inst, res: results[i] }));
   const sig = sigOf(items);
   // re-creating the price series (chart type, style, symbol load) puts its pane back on top
-  const rebuild = force || sig !== app.ind.sig || mainIdx() !== (app.ind.mainAt || 0);
+  const rebuild = force === true || sig !== app.ind.sig || mainIdx() !== (app.ind.mainAt || 0);
   if (rebuild) rebuildIndicatorSeries(items);
-  else updateIndicatorData(items);
+  else updateIndicatorData(items, force === 'data');
   app.ind.sig = sig;
   // Rebuild the legend DOM only when its content changes: re-creating it on every live tick
   // dropped the hover state, so the legend buttons vanished under a resting mouse pointer.
   const lkey = legendKey();
-  if (rebuild || lkey !== app.ind.legendKey) renderLegend();
+  if (rebuild || force || lkey !== app.ind.legendKey) renderLegend();
   updateLegendValues(null);
 }
 app.refreshIndicators = refreshIndicators;
@@ -1068,18 +1076,18 @@ function point(plot, i) {
 }
 
 // Push a plot to its series: only the changed last bar on live ticks (cheap), everything otherwise.
-function syncSeries(s, prev, p) {
+function syncSeries(s, prev, p, full = false) {
   const n = p.data.length;
   p.mode = plotMode(p);
   if (p.mode === 'const' || prev?.mode === 'const') {
     // two points only: cheap to re-send; keep the autoscale hint in line with the value
-    if (p.mode !== prev?.mode || p.constValue !== prev?.constValue || n !== prev?.data.length) {
+    if (full || p.mode !== prev?.mode || p.constValue !== prev?.constValue || n !== prev?.data.length) {
       s.applyOptions({ autoscaleInfoProvider: constScale(p) });
       s.setData(seriesData(p));
     }
     return;
   }
-  if (!prev || prev.data.length !== n || prev.style !== p.style || n > S.view.length) { s.setData(seriesData(p)); return; }
+  if (full || !prev || prev.data.length !== n || prev.style !== p.style || n > S.view.length) { s.setData(seriesData(p)); return; }
   let k = n;
   for (let i = 0; i < n; i++) {
     if (prev.data[i] !== p.data[i] || (p.colors && (!prev.colors || prev.colors[i] !== p.colors[i]))) { k = i; break; }
@@ -1419,7 +1427,15 @@ function rebuildIndicatorSeries(items) {
   app.ind.mainAt = Math.max(0, Math.min(S.mainPos || 0, paneIdx));
   if (!app.ind.items.some(x => x.inst.id === app.maxPane && x.own)) app.maxPane = null;
   placeMainPane();
-  if (range) setRange(range);
+  if (range) {
+    setRange(range);
+    // the reset can come with the chart's next layout, after this call: check again then
+    const seq = rangeSeq;
+    afterLayout(() => {
+      const r = app.chart.timeScale().getVisibleLogicalRange();
+      if (seq === rangeSeq && r && (Math.abs(r.from - range.from) > 0.5 || Math.abs(r.to - range.to) > 0.5)) setRange(range);
+    });
+  }
 }
 
 // Panes created in this tick are not known to the chart model until it lays them out
@@ -1441,14 +1457,19 @@ function placeMainPane(tries = 0) {
   if (tries) renderLegend(); // pane indices changed after the legend was drawn
 }
 
-function updateIndicatorData(items) {
+function updateIndicatorData(items, full = false) {
   items.forEach(({ res }, i) => {
     const it = app.ind.items[i];
     if (!it) return;
     const prev = it.res;
     it.res = res;
     if (!it.inst.visible || res.error) return;
-    res.plots.forEach((p, j) => { if (it.series[j]) syncSeries(it.series[j], prev?.plots?.[j], p); });
+    if (full && res.overlay && !res.volume) {
+      for (const s of it.series) s.applyOptions({ priceFormat: { type: 'price', precision: S.priceDecimals, minMove: minMove(S.priceDecimals) } });
+    }
+    // full: new bars (other times), so even unchanged values are sent again
+    res.plots.forEach((p, j) => { if (it.series[j]) syncSeries(it.series[j], prev?.plots?.[j], p, full); });
+    if (full && !res.plots.length && it.series[0]) it.series[0].setData(S.view.map(b => ({ time: b.time, value: 0 }))); // shapes-only pane carrier
     it.fillPrim?.update();
     it.shapePrim?.update();
   });
@@ -1695,7 +1716,7 @@ function updateLegendValues(idx) {
 function buildTopbar() {
   $('#symbol-btn').onclick = () => dialogs.symbolSearch(app);
   const more = $('#tf-more');
-  more.append(el('button', { class: 'tb-btn icon', title: 'All timeframes', html: ICONS.caret, onclick: (e) => {
+  more.append(el('button', { class: 'tb-btn icon tf-more-btn', title: 'All timeframes', 'data-testid': 'tf-more', html: `<span class="m-tf" id="m-tf"></span>${ICONS.caret}`, onclick: (e) => {
     showMenu(e.currentTarget, [
       { title: 'Timeframes (★ = favorites)' },
       ...Object.keys(TF_SEC).filter(tf => S.availableTfs.includes(tf)).map(tf => ({
@@ -1740,7 +1761,13 @@ function buildTopbar() {
   const um = $('#user-menu');
   const ub = el('button', { class: 'tb-btn', id: 'user-btn', title: 'User' },
     el('span', { style: { width: '24px', height: '24px', borderRadius: '50%', background: '#2962ff', display: 'grid', placeItems: 'center', fontWeight: 700, color: '#fff' } }, (S.user.display_name || '?')[0].toUpperCase()));
-  ub.onclick = () => showMenu(ub, [
+  ub.onclick = () => showMenu(ub, userMenuItems(), { align: 'right' });
+  um.append(ub);
+}
+
+// The user menu: in the top bar on desktop, in the ☰ menu on phones.
+function userMenuItems() {
+  return [
     { title: `${S.user.display_name} · ${S.plan?.name || ''} plan` },
     { label: 'Notifications…', testid: 'menu-notify', onClick: () => dialogs.notifySettings(app) },
     { sep: true },
@@ -1752,8 +1779,7 @@ function buildTopbar() {
       { sep: true }] : []),
     ...(S.user.auth_provider === 'local' ? [{ label: 'Change password', onClick: () => dialogs.changePassword(app) }] : []),
     { label: 'Sign out', testid: 'menu-logout', onClick: async () => { await api.logout(); location.reload(); } },
-  ], { align: 'right' });
-  um.append(ub);
+  ];
 }
 
 function renderTfButtons() {
@@ -1765,6 +1791,8 @@ function renderTfButtons() {
   for (const tf of tfs) {
     g.append(el('button', { class: `tf-btn ${tf === S.tf ? 'active' : ''}`, title: TF_NAME[tf], 'data-tf': tf, onclick: () => setTf(tf) }, TF_SHORT[tf] || tf));
   }
+  const m = $('#m-tf'); // phones show only the current timeframe, on the "all timeframes" button
+  if (m) m.textContent = TF_SHORT[S.tf] || S.tf;
 }
 app.renderTfButtons = renderTfButtons;
 
@@ -1817,7 +1845,13 @@ const GROUP_ICONS = {
   shapes: TOOL_ICONS.brush,
   annotation: TOOL_ICONS.text,
 };
-const TOOL_ICON_FOR = (id) => TOOL_ICONS[id] || GROUP_ICONS[TOOLS[id]?.group] || TOOL_ICONS.trend;
+const EXTRA_ICONS = {
+  zoom: '<circle cx="10" cy="10" r="6" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M15 15l6 6M7 10h6M10 7v6" stroke="currentColor" stroke-width="1.6"/>',
+  lock: ICONS.lock.replace(/width="16" height="16"/, ''),
+  clear: ICONS.trash.replace(/width="16" height="16"/, ''),
+  ruler: TOOL_ICONS.measure,
+};
+const TOOL_ICON_FOR = (id) => TOOL_ICONS[id] || EXTRA_ICONS[id] || GROUP_ICONS[TOOLS[id]?.group] || TOOL_ICONS.trend;
 
 function buildLeftTools() {
   const nav = $('#lefttools');
@@ -1855,14 +1889,14 @@ function buildLeftTools() {
   }
   nav.append(el('div', { class: 'lt-sep' }));
   add('ruler', 'Measure (Shift+click on chart also works)', TOOL_ICONS.measure, () => app.dm.setTool(app.dm.tool === 'ruler' ? 'cursor' : 'ruler'));
-  add('zoom', 'Zoom in (drag a range)', '<circle cx="10" cy="10" r="6" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M15 15l6 6M7 10h6M10 7v6" stroke="currentColor" stroke-width="1.6"/>', () => app.dm.setTool(app.dm.tool === 'zoom' ? 'cursor' : 'zoom'));
+  add('zoom', 'Zoom in (drag a range)', EXTRA_ICONS.zoom, () => app.dm.setTool(app.dm.tool === 'zoom' ? 'cursor' : 'zoom'));
   nav.append(el('div', { class: 'lt-sep' }));
   add('magnet', 'Magnet mode (snap to OHLC)', TOOL_ICONS.magnet, () => { S.magnet = !S.magnet; renderLeftActive(); app.saveLayout(); });
   add('keep', 'Stay in drawing mode', TOOL_ICONS.keep, () => { S.keepDrawing = !S.keepDrawing; renderLeftActive(); app.saveLayout(); });
-  add('lock', 'Lock all drawings', ICONS.lock.replace(/width="16" height="16"/, ''), () => { app.dm.locked = !app.dm.locked; renderLeftActive(); });
+  add('lock', 'Lock all drawings', EXTRA_ICONS.lock, () => { app.dm.locked = !app.dm.locked; renderLeftActive(); });
   add('hide', 'Hide/show drawings', TOOL_ICONS.hide, () => { app.dm.hidden = !app.dm.hidden; app.dm.select(null); renderLeftActive(); });
   nav.append(el('div', { class: 'lt-sep' }));
-  add('clear', 'Remove all drawings', ICONS.trash.replace(/width="16" height="16"/, ''), async () => {
+  add('clear', 'Remove all drawings', EXTRA_ICONS.clear, async () => {
     if (!app.dm.drawings.length) return;
     if (await dialogs.confirm(`Remove all ${app.dm.drawings.length} drawings on ${app.symbolName(S.symbol)}?`, { ok: 'Remove', danger: true })) app.dm.removeAll();
   });
@@ -1952,9 +1986,10 @@ function buildBottombar() {
     return `UTC${sec > 0 ? '+' : '-'}${Math.abs(h)}${m ? ':' + pad(m) : ''}`;
   };
   const pick = async (id) => { S.tz = id; S.tzOffset = tzOffsetSec(id); renderTz(); app.saveLayout(); await setSymbol(S.symbol); };
-  tzBtn.onclick = () => {
+  tzBtn.onclick = () => app.openTzMenu(tzBtn);
+  app.openTzMenu = (anchor) => {
     const zones = TIMEZONES.map(([id, name]) => ({ id, name, off: tzOffsetSec(id) })).sort((a, b) => a.off - b.off);
-    showMenu(tzBtn, [
+    showMenu(anchor, [
       { label: 'UTC', active: S.tz === 'UTC', onClick: () => pick('UTC') },
       { label: 'Exchange', active: S.tz === 'exchange', onClick: () => pick('exchange') },
       { label: `Browser (${fmtOff(tzOffsetSec('local'))})`, active: S.tz === 'local', onClick: () => pick('local') },
@@ -1962,6 +1997,7 @@ function buildBottombar() {
       ...zones.map(z => ({ label: `(${fmtOff(z.off)}) ${z.name}`, active: z.id === S.tz, testid: `tz-${z.name}`, onClick: () => pick(z.id) })),
     ], { align: 'right' });
   };
+  app.tzLabel = () => tzBtn.textContent;
   tzWrap.append(tzBtn);
   const tick = () => {
     const d = new Date(Date.now() + S.tzOffset * 1000);

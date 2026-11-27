@@ -11,7 +11,8 @@ store and Binance as the live feed.
   pane controls (move up/down, also above the price pane, delete, collapse, maximize) with their own
   auto / log scale; "scroll to the most recent bar" button (Alt+Shift+→); changing the timeframe keeps
   the date on screen; **Go to** (calendar button in the bottom bar, `Alt+G`): a date or a custom range;
-  phone layout (portrait and landscape: scrolling bars, one-line legends).
+  phone layout (portrait and landscape): bottom tabs Chart / Watchlist / Alerts / Draw, a ☰ menu for the
+  rest, drawing tools in a bottom sheet with a small tool bar while drawing, one-line legends.
 - **Data**: live bars from one exchange REST call per selection plus one multiplexed websocket;
   older history is loaded from ClickHouse on scroll ("No data on ClickHouse" when there is none).
 - **Drawing tools**: every TradingView tool family except AI and icons — trend lines, channels,
