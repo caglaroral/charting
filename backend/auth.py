@@ -146,7 +146,8 @@ def set_password(user_id: str, password: str) -> None:
     ch.insert(f"{DB}.users", [r])
 
 
-USER_TABLES = ("sessions", "watchlists", "drawings", "settings", "alerts", "alert_events", "scripts")
+USER_TABLES = ("sessions", "watchlists", "drawings", "settings", "alerts", "alert_events", "alert_log", "scripts",
+               "screens", "papers", "paper_trades")
 
 
 def purge_user(user_id: str) -> None:

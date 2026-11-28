@@ -442,6 +442,7 @@ export async function datasourceAdmin(app) {
       user: el('input', { value: d.user, 'data-testid': 'ds-user' }),
       password: el('input', { type: 'password', placeholder: d.has_password ? '•••••• (type to change)' : '', autocomplete: 'new-password', 'data-testid': 'ds-password' }),
       live: el('select', {}, [['', 'None (ClickHouse only)'], ['binance-futures', 'Binance USDT-M Futures'], ['binance-spot', 'Binance Spot']].map(([v, l]) => el('option', { value: v, selected: v === (d.live || '') }, l))),
+      recent: el('input', { value: d.recent || '', list: 'ds-table-list', placeholder: 'optional, e.g. live_1m_klines', spellcheck: 'false', 'data-testid': 'ds-recent' }),
       enabled: el('input', { type: 'checkbox', checked: d.enabled !== false }),
       database: el('select', { 'data-testid': 'ds-database' }, d.database ? el('option', { value: d.database }, d.database) : null),
     };
@@ -529,6 +530,7 @@ export async function datasourceAdmin(app) {
         el('label', {}, ''), el('div', {}, el('button', { class: 'btn', 'data-testid': 'ds-test', onclick: test }, 'Test connection')),
         el('label', {}, 'Database'), el('div', { style: { display: 'flex', gap: '6px' } }, f.database, el('button', { class: 'btn', 'data-testid': 'ds-discover', onclick: () => discover() }, 'Scan tables')),
         el('label', {}, 'Live data'), f.live,
+        el('label', { title: 'A table of the latest 1m bars with the same columns, merged after the history tables. The screener, strategy tester and paper trading then run on today\'s bars.' }, 'Recent 1m table'), f.recent,
         el('label', {}, 'Enabled'), f.enabled),
       el('div', { style: { margin: '10px 0' } }, status),
       el('b', {}, 'Timeframe tables'),
@@ -543,7 +545,7 @@ export async function datasourceAdmin(app) {
             if (tables[r.tf]) return toast(`Two tables are set for ${r.tf}: ${tables[r.tf]} and ${r.table}. Pick one.`, 'error');
             tables[r.tf] = r.table;
           }
-          const cfg = { ...conn(), name: f.name.value, prefix: f.prefix.value.toUpperCase(), live: f.live.value, enabled: f.enabled.checked, tables, columns: Object.fromEntries(COLS.map(c => [c, colInputs[c].value.trim()])) };
+          const cfg = { ...conn(), name: f.name.value, prefix: f.prefix.value.toUpperCase(), live: f.live.value, recent: f.recent.value.trim(), enabled: f.enabled.checked, tables, columns: Object.fromEntries(COLS.map(c => [c, colInputs[c].value.trim()])) };
           try {
             await api.adminSaveDatasource(cfg);
             toast('Source saved', 'ok');

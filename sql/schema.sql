@@ -189,3 +189,62 @@ CREATE TABLE IF NOT EXISTS charting.alert_log
 ENGINE = MergeTree
 ORDER BY (user_id, created_at)
 TTL toDateTime(created_at) + INTERVAL 180 DAY;
+
+-- Optional table of the latest 1m bars (same columns as the history tables), merged after the history tables'
+-- last bar by the screener / strategy tester / paper trading (backtester service)
+ALTER TABLE charting.datasources ADD COLUMN IF NOT EXISTS recent String DEFAULT '' AFTER live;
+
+-- Saved screener filters. spec = {source, tf, conds, columns, universe, sort} (see backend/screener.py)
+CREATE TABLE IF NOT EXISTS charting.screens
+(
+    user_id String,
+    id String,
+    name String,
+    spec String,
+    deleted UInt8 DEFAULT 0,
+    updated_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (user_id, id);
+
+-- Paper-trading strategies. strategy = engine strategy (app timeframes), universe = symbols to trade,
+-- state = {symbol: {resume, open, last_close, status}} written by the paper engine. A change of the strategy or
+-- the symbols starts a new run (run + 1, started_at = now); trades of earlier runs are kept.
+CREATE TABLE IF NOT EXISTS charting.papers
+(
+    user_id String,
+    id String,
+    name String,
+    source String,
+    strategy String,
+    symbols Array(String),
+    size Float64 DEFAULT 1000,
+    channels String DEFAULT '[]',
+    active UInt8 DEFAULT 1,
+    run UInt32 DEFAULT 1,
+    started_at UInt32,
+    state String DEFAULT '{}',
+    created_at DateTime64(3) DEFAULT now64(3),
+    deleted UInt8 DEFAULT 0,
+    updated_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (user_id, id);
+
+-- Closed paper trades (times in seconds, net in the quote currency after fees and slippage)
+CREATE TABLE IF NOT EXISTS charting.paper_trades
+(
+    user_id String,
+    paper_id String,
+    run UInt32,
+    symbol LowCardinality(String),
+    side Int8,
+    entry_time UInt32,
+    exit_time UInt32,
+    entry_price Float64,
+    exit_price Float64,
+    net Float64,
+    created_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(created_at)
+ORDER BY (user_id, paper_id, run, symbol, entry_time);

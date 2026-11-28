@@ -78,11 +78,19 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-ALERT-08 | Timeframe | Open the alert dialog; closed above on "Chart", closed below on 4h; edit | List starts with "Chart (1 hour)" (default) and has the symbol's timeframes; alerts saved with 1h / 4h; editing shows the alert's timeframe |
 | TC-MOBILE-01 | Phone | 390×844 touch: toolbars, timeframe list, Watchlist / Alerts tabs, ☰ menu | Tab bar and ☰ instead of the toolbars; the panel covers the chart and a watchlist pick returns to it; scale toggles and Go to in the menu |
 | TC-MOBILE-02 | Phone | Draw tab → Trend Line, two taps; Horizontal Line → cancel | Sheet closes, tool bar shows the tool, the line is drawn; cancel returns to the cursor |
+| TC-SCREEN-01 | Screener | RSI(14) < 50 on 1h, EMA(200) 4h column, sort, open a row; save, rename, save as, edit + save, open, delete | Fewer rows than unfiltered, every RSI < 50, sorted, symbol opened; screens stored with their spec, `*` while unsaved |
+| TC-SCREEN-02 | Screener alerts | Alert on an unsaved screen (saves it first); free user: 6 screens, screener alert, invalid indicator | Alert listed as "Screen … new matches" (`kind: screener`, `BINANCE:*`); free: 6th screen and alert → 402; unknown indicator → 400 |
+| TC-SCREEN-03 | Phone | ☰ → Screener, Strategy Tester tab, Chart tab | Full-width panel with results, tester form, Chart closes it |
+| TC-TEST-01 | Strategy tester | Run without entry; RSI(14) < 30 long 1h, 2% / 4%; open the symbol row and a trade; free user with 6 symbols | Error shown; totals and per-symbol row; trade list = trade count, chart on 1h; free → 402 |
+| TC-PAPER-01 | Paper trading | Create (1m, BTCUSDT + DOGEUSDT), wait for the engine, rename, change size, pause, resume, restart, details, delete; free user: two strategies | Running, state for both symbols within 2 min; rename keeps run 1, size → run 2, resume → 3, restart → 4; deleted; free: 2nd → 402 |
 | TC-ADMIN-01 | Data sources | Edit source, Test connection, Scan tables | Connected, OHLC tables listed |
 | TC-ADMIN-02 | Admin | Plans and Users dialogs; non-admin menu | Limits shown, plan assigned, no admin menu for users |
 | TC-PERSIST-01 | Workspace | Change symbol, timeframe, chart type, indicators, draw; logout/login | Everything restored |
 
 ## Manual checks
+
+- Screener alert delivery: a screen on 1m (e.g. Close crosses up EMA(20)) with an alert fires once the recent 1m
+  table has the next bars (its delay applies); the Alerts tab log shows the trigger with the new symbols.
 
 - Telegram / e-mail delivery: configure *Notification servers*, then **Send test** in
   *user menu → Notifications*.

@@ -48,7 +48,7 @@ function buildTabbar() {
   const bar = $('#tabbar');
   const tab = (id, label, onclick) => el('button', { class: 'tab-btn', 'data-tab': id, 'data-testid': `tab-${id}`, onclick, html: icon(id === 'draw' ? 'draw' : id) }, el('span', {}, label));
   bar.append(
-    tab('chart', 'Chart', () => { closeSheet(); setPanel(null); }),
+    tab('chart', 'Chart', () => { closeSheet(); setPanel(null); app.openBottomPanel?.(null); }),
     tab('watchlist', 'Watchlist', () => { closeSheet(); setPanel(panel === 'watchlist' ? null : 'watchlist'); }),
     tab('alerts', 'Alerts', () => { closeSheet(); setPanel(panel === 'alerts' ? null : 'alerts'); }),
     tab('draw', 'Draw', () => { setPanel(null); sheet === 'draw' ? closeSheet() : openDrawSheet(); }),
@@ -111,6 +111,9 @@ function openMenuSheet() {
     body.innerHTML = '';
     body.append(...listItems([
       { title: 'Chart' },
+      { label: 'Screener', testid: 'screener', onClick: () => app.openBottomPanel('screener') },
+      { label: 'Strategy tester', testid: 'tester', onClick: () => app.openBottomPanel('tester') },
+      { label: 'Paper trading', testid: 'paper', onClick: () => app.openBottomPanel('paper') },
       { label: 'Custom indicator editor', testid: 'editor', onClick: () => d.dialogs.scriptEditor(app) },
       { label: 'Add price alert', testid: 'alert', onClick: () => d.dialogs.alertDialog(app, { kind: 'price' }) },
       { label: 'Go to date…', testid: 'goto', onClick: () => d.dialogs.goToDialog(app) },

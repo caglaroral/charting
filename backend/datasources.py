@@ -131,7 +131,7 @@ _cache: dict = {"at": 0.0, "sources": None}
 
 def _load_rows() -> list[dict]:
     rows = ch.query(
-        f"SELECT id, name, prefix, url, user, password_enc, database, tables, columns, live, enabled, sort "
+        f"SELECT id, name, prefix, url, user, password_enc, database, tables, columns, live, recent, enabled, sort "
         f"FROM {DB}.datasources FINAL WHERE deleted = 0 ORDER BY sort, name")
     out = []
     for r in rows:
@@ -142,7 +142,7 @@ def _load_rows() -> list[dict]:
         out.append({
             "id": r["id"], "name": r["name"], "prefix": r["prefix"], "url": r["url"], "user": r["user"],
             "password": pw, "database": r["database"], "tables": json.loads(r["tables"] or "{}"),
-            "columns": json.loads(r["columns"] or "{}"), "live": r["live"],
+            "columns": json.loads(r["columns"] or "{}"), "live": r["live"], "recent": r.get("recent") or "",
             "enabled": bool(int(r["enabled"])), "sort": int(r["sort"]),
         })
     return out
@@ -165,7 +165,32 @@ def bootstrap_default() -> None:
     if tables:
         save({"name": "Binance (ClickHouse)", "prefix": "BINANCE", "url": config.CH_URL, "user": config.CH_USER,
               "password": config.CH_PASSWORD, "database": config.CH_MARKET_DB, "tables": tables,
-              "columns": DEFAULT_COLUMNS, "live": "binance-futures", "enabled": True})
+              "columns": DEFAULT_COLUMNS, "live": "binance-futures", "enabled": True,
+              "recent": RECENT_DEFAULT if RECENT_DEFAULT in names else ""})
+
+
+RECENT_DEFAULT = "live_1m_klines"
+
+
+def migrate_recent() -> None:
+    """Once (sources created before the field existed): use the latest-1m table next to the history tables of a
+    source when one exists, so screens run on today's bars. Admins can change or clear it afterwards."""
+    from . import store
+    if store.get_setting("_system", "migrated_recent_v1"):
+        return
+    for s in sources(enabled_only=False):
+        if s.cfg.get("recent") or not s.tables:
+            continue
+        try:
+            have = {r["name"] for r in s.client.query(
+                "SELECT name FROM system.columns WHERE database = {d:String} AND table = {t:String}",
+                {"d": s.db, "t": RECENT_DEFAULT})}
+        except ch.CHError:
+            continue
+        if all(s.cols[k] in have for k in ("symbol", "time", "open", "high", "low", "close", "volume")):
+            save({**s.cfg, "recent": RECENT_DEFAULT})
+            print(f"datasource {s.prefix}: recent 1m table set to {RECENT_DEFAULT}")
+    store.set_setting("_system", "migrated_recent_v1", True)
 
 
 def sources(enabled_only: bool = True) -> list[Source]:
@@ -214,9 +239,10 @@ def save(cfg: dict) -> dict:
     if not tables and not cfg.get("live"):
         raise ValueError("Select a table for at least one timeframe (or a live provider)")
     columns = {**DEFAULT_COLUMNS, **{k: str(v).strip() for k, v in (cfg.get("columns") or {}).items() if str(v or "").strip()}}
-    if tables:
+    recent = str(cfg.get("recent") or "").strip()
+    if tables or recent:
         try:
-            check_tables({**cfg, "id": cfg.get("id")}, tables, columns)
+            check_tables({**cfg, "id": cfg.get("id")}, {**tables, **({"recent 1m": recent} if recent else {})}, columns)
         except ValueError:
             raise
         except Exception as e:
@@ -240,6 +266,7 @@ def save(cfg: dict) -> dict:
         "database": str(cfg["database"]), "tables": json.dumps(tables),
         "columns": json.dumps(columns),
         "live": cfg.get("live") if cfg.get("live") in ("binance-futures", "binance-spot") else "",
+        "recent": recent,
         "enabled": int(cfg.get("enabled", True)), "sort": int(cfg.get("sort") or 0),
         "updated_at": f"{time.time():.3f}",
     }])

@@ -18,6 +18,9 @@ All admin screens are in the **user menu** (top right) of an admin account.
    should rename them (`SELECT ts AS timestamp, …`). On **Save** the server checks that every table
    exists and has the mapped columns; two tables for one timeframe are rejected.
 4. **Live data**: Binance USDT-M Futures / Binance Spot / none.
+5. **Recent 1m table** (optional): a table of the latest 1m bars with the same columns (e.g. `live_1m_klines`),
+   merged after the history tables' last bar by the screener, strategy tester and paper trading, so they run on
+   today's bars. Existing sources got `live_1m_klines` once, when that table existed next to their tables.
 
 Missing timeframes are aggregated from the largest smaller table that divides them (e.g. 30m from
 15m, 1W from 1D). Passwords are stored encrypted with `SECRET_KEY` (generated into `.env` on first
@@ -52,7 +55,13 @@ also offers a permanent purge of the user and all their rows: `DELETE /api/admin
 | Custom indicators | 3 | 25 | 100 | ∞ |
 | Watchlists / symbols per list | 2 / 30 | 10 / 200 | 50 / 1000 | ∞ |
 | Indicators per chart | 5 | 15 | 30 | ∞ |
+| Saved screens | 5 | 50 | 200 | ∞ |
+| Screener alerts | – | ✓ | ✓ | ✓ |
+| Symbols per backtest run | 5 | 30 | 100 | ∞ |
+| Paper-trading strategies (running) | 1 | 10 | 50 | ∞ |
+| Symbols per paper-trading strategy | 10 | 100 | 500 | ∞ |
 
+Plans saved before a limit existed use the default plan's value for it (custom plans: unlimited).
 Users without a plan get *free*; admins without a plan get *unlimited*. Limits are enforced by the API
 (HTTP 402 with a readable message) and by the alert engine (a downgraded user's oldest alerts keep
 running up to the limit).

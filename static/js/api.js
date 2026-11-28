@@ -68,6 +68,18 @@ export const api = {
   alertLog: (o = {}) => req('GET', '/api/alerts/log?' + qs(o)),
   alertEvents: (since) => req('GET', '/api/alerts/events?' + qs({ since })),
 
+  screenerMeta: () => req('GET', '/api/screener/meta'),
+  screenerRun: (spec) => req('POST', '/api/screener/run', { spec }),
+  screens: () => req('GET', '/api/screens'),
+  saveScreen: (s) => req('POST', '/api/screens', s),
+  deleteScreen: (id) => req('DELETE', '/api/screens/' + encodeURIComponent(id)),
+  backtest: (body) => req('POST', '/api/backtest', body),
+  papers: () => req('GET', '/api/papers'),
+  savePaper: (p) => req('POST', '/api/papers', p),
+  deletePaper: (id) => req('DELETE', '/api/papers/' + encodeURIComponent(id)),
+  resetPaper: (id) => req('POST', '/api/papers/' + encodeURIComponent(id) + '/reset', {}),
+  paperTrades: (id, run) => req('GET', '/api/papers/' + encodeURIComponent(id) + '/trades?' + qs({ run })),
+
   scripts: () => req('GET', '/api/scripts'),
   saveScript: (s) => req('POST', '/api/scripts', s),
   deleteScript: (id) => req('DELETE', '/api/scripts/' + encodeURIComponent(id)),

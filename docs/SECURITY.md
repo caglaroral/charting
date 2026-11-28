@@ -28,6 +28,16 @@ alerts, events). Admin endpoints check `is_admin`. ClickHouse queries use server
 passwords, the SMTP password and the Telegram token are encrypted with `SECRET_KEY`
 (SHA-256 CTR keystream + HMAC tag).
 
+## Backtester
+
+The `backtester` container runs only the backtest engine; no user code reaches it: screens and strategies are
+JSON with indicator names from a fixed list and bounded numbers, validated in `backtester/bt/spec.py` (the
+engine's expression parser is not exposed). It has no published port (only the backend on the compose network
+calls it), a read-only root file system with a tmpfs cache, no capabilities, `no-new-privileges`, an unprivileged
+user, memory and process limits, and no secrets in its environment: the backend sends the data source connection
+with each request. It needs network access to ClickHouse (SELECT only) and to the exchange REST API (closed bars
+of symbols missing from the recent table, within a weight budget).
+
 ## User code (custom indicators)
 
 Custom indicators are untrusted code and run isolated on both sides.

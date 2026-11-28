@@ -16,7 +16,7 @@ from http import cookies as http_cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from backend import alerts, auth, ch, config, datasources, live, market, notify, plans, store
+from backend import alerts, auth, ch, config, datasources, live, market, notify, paper, plans, screener, store
 
 PROVIDER = auth.make_provider()
 
@@ -123,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": e.msg}, e.status)
         except auth.AuthError as e:
             self._json({"error": str(e)}, 400)
+        except screener.BTError as e:
+            self._json({"error": str(e)}, e.status)
         except plans.PlanLimit as e:
             self._json({"error": str(e), "plan_limit": True}, 402)
         except market.NotFound as e:
@@ -182,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "me":
             p = plans.plan_of(user)
-            return self._json({"user": user.public(), "plan": p})
+            return self._json({"user": user.public(), "plan": {**p, "limits": plans.limits_of(user)}})
 
         # ---- admin
         if route == "admin":
@@ -345,6 +347,50 @@ class Handler(BaseHTTPRequestHandler):
             if method == "DELETE" and len(parts) > 1:
                 store.delete_script(uid, parts[1])
                 return self._json({"ok": True})
+        # ---- screener, strategy tester, paper trading (backtester service)
+        if route == "screener":
+            if method == "GET" and parts[1:2] == ["meta"]:
+                return self._json(screener.meta())
+            if method == "POST" and parts[1:2] == ["run"]:
+                try:
+                    return self._json(screener.run(uid, self._body().get("spec") or {}))
+                except ValueError as e:
+                    raise HttpError(400, str(e))
+        if route == "screens":
+            if method == "GET":
+                return self._json({"screens": screener.list_screens(uid)})
+            if method in ("POST", "PUT"):
+                try:
+                    return self._json({"screen": screener.save_screen(user, self._body())})
+                except ValueError as e:
+                    raise HttpError(400, str(e))
+            if method == "DELETE" and len(parts) > 1:
+                screener.delete_screen(uid, parts[1])
+                return self._json({"ok": True})
+        if route == "backtest" and method == "POST":
+            try:
+                return self._json(screener.backtest(user, self._body()))
+            except ValueError as e:
+                raise HttpError(400, str(e))
+        if route == "papers":
+            if method == "GET" and len(parts) > 2 and parts[2] == "trades":
+                run = q.get("run")
+                return self._json({"trades": paper.trades(uid, parts[1], int(run) if run else None)})
+            if method == "GET":
+                return self._json({"papers": paper.list_papers(uid)})
+            if method == "POST" and len(parts) > 2 and parts[2] == "reset":
+                try:
+                    return self._json({"paper": paper.reset_paper(uid, parts[1])})
+                except ValueError as e:
+                    raise HttpError(404, str(e))
+            if method in ("POST", "PUT"):
+                try:
+                    return self._json({"paper": paper.save_paper(user, self._body())})
+                except (ValueError, TypeError) as e:
+                    raise HttpError(400, str(e))
+            if method == "DELETE" and len(parts) > 1:
+                paper.delete_paper(uid, parts[1])
+                return self._json({"ok": True})
         if route == "settings" and len(parts) > 1:
             key = parts[1][:64]
             if method == "GET":
@@ -386,10 +432,16 @@ def main():
         return _cli(sys.argv[1:])
     ch.apply_schema()
     datasources.bootstrap_default()
+    try:
+        datasources.migrate_recent()
+    except Exception as e:
+        print(f"datasource migration: {e}", file=sys.stderr)
     plans.bootstrap()
     if PROVIDER.name == "local" and auth.count_users() == 0:
         print("WARNING: no users yet. Create one: python3 server.py adduser <name> --admin", file=sys.stderr)
     alerts.start_engine()
+    paper.start_engine()
+    screener.warm_up()
     srv = ThreadingHTTPServer((config.HOST, config.PORT), Handler)
     srv.daemon_threads = True
     print(f"Charting server: http://{config.HOST}:{config.PORT}  (auth={PROVIDER.name})", file=sys.stderr)

@@ -6,6 +6,8 @@ Alert kinds
   indicator  spec = {"type" (builtin name or "custom"), "script_id"?, "params", "plot",
                     "target": {"type": "value", "value": x} | {"type": "plot", "plot": k}, "tz"}
              Indicators are computed by the same JS as the browser (jsrunner -> Node worker).
+  screener   spec = {"screen_id", "name"}, cond "entered": fires on each closed bar of the screen's timeframe
+             when symbols newly match the saved screen (backtester service); symbol = "<source>:*"
 
 Conditions: crossing, crossing_up, crossing_down, greater, less, entering, exiting (two-level targets),
             closed_above, closed_below (the close of a closed bar; the forming bar is skipped),
@@ -25,14 +27,14 @@ import time
 import traceback
 import uuid
 
-from . import ch, config, jsrunner, market, notify, plans, store
+from . import ch, config, jsrunner, market, notify, plans, screener, store
 
 DB = config.CH_APP_DB
 POLL_SECONDS = 20
 WARMUP_BARS = 600
 
 CONDS = {"crossing", "crossing_up", "crossing_down", "greater", "less", "closed_above", "closed_below",
-         "entering", "exiting", "signal"}
+         "entering", "exiting", "signal", "entered"}
 CLOSED_CONDS = {"closed_above", "closed_below"}  # only bars that have closed
 LINE_TOOLS = {"trend", "ray", "extended", "hline", "hray"}
 ZONE_TOOLS = {"rect", "channel"}
@@ -41,7 +43,7 @@ COND_TEXT = {
     "crossing": "crossing", "crossing_up": "crossing up", "crossing_down": "crossing down",
     "greater": "greater than", "less": "less than", "closed_above": "closed above", "closed_below": "closed below",
     "entering": "entering channel", "exiting": "exiting channel",
-    "signal": "signal",
+    "signal": "signal", "entered": "new matches",
 }
 
 _COLS = ("id, symbol, tf, kind, cond, spec, frequency, message, channels, active, last_bar, last_fired, fired_count, "
@@ -126,21 +128,40 @@ def _latest_bar_time(symbol: str, tf: str) -> int:
     return int(b[-1][0]) if b else 0
 
 
+def _last_closed_bar(tf: str) -> int:
+    """Open time of the last closed bar (a screener alert reports bars that close after it was armed)."""
+    sec = market.TIMEFRAMES[tf]
+    if tf == "1W":   # Monday-aligned weeks
+        return (int(time.time()) - 4 * 86400) // sec * sec + 4 * 86400 - sec
+    return int(time.time()) // sec * sec - sec
+
+
 def save_alert(user, a: dict) -> dict:
     """user: auth.User (plan limits are enforced here and in the engine)."""
     uid = user.id
     symbol = str(a.get("symbol", "")).strip()
-    if not market.known_symbol(symbol):
-        raise ValueError("Unknown symbol")
     kind = a.get("kind")
     cond = a.get("cond")
-    if kind not in ("price", "drawing", "indicator") or cond not in CONDS:
-        raise ValueError("Invalid alert")
     spec = a.get("spec") or {}
+    screen = None
+    if kind == "screener":
+        screen = screener.get_screen(uid, str(spec.get("screen_id", "")))
+        if not screen:
+            raise ValueError("Saved screen not found")
+        cond = "entered"
+        symbol = f"{screen['spec']['source']}:*"
+        a = {**a, "tf": screen["spec"]["tf"]}
+        spec = {"screen_id": screen["id"], "name": screen["name"]}
+    elif not market.known_symbol(symbol):
+        raise ValueError("Unknown symbol")
+    if kind not in ("price", "drawing", "indicator", "screener") or cond not in CONDS:
+        raise ValueError("Invalid alert")
     tf = a.get("tf") or "1m"  # every kind is evaluated on the timeframe chosen in the dialog
     if tf not in market.TIMEFRAMES:
         raise ValueError("Invalid timeframe")
-    if kind == "price":
+    if kind == "screener":
+        pass
+    elif kind == "price":
         spec = {"price": float(spec["price"])}
     elif kind == "drawing":
         if not spec.get("drawing_id"):
@@ -159,6 +180,8 @@ def save_alert(user, a: dict) -> dict:
     active = int(bool(a.get("active", 1)))
     # ---- plan limits
     lim = plans.limits_of(user)
+    if kind == "screener":
+        plans.check_flag(user, "screener_alerts", "Screener alerts")
     if kind == "indicator":
         plans.check_flag(user, "indicator_alerts", "Indicator alerts")
         if spec.get("type") == "custom":
@@ -181,7 +204,7 @@ def save_alert(user, a: dict) -> dict:
         "message": str(a.get("message") or "")[:500],
         "channels": json.dumps(sorted({"app", *[c for c in (a.get("channels") or []) if c in notify.CHANNELS]})),
         "active": active,
-        "last_bar": _latest_bar_time(symbol, tf) if rearm else existing["last_bar"],
+        "last_bar": (_last_closed_bar(tf) if kind == "screener" else _latest_bar_time(symbol, tf)) if rearm else existing["last_bar"],
         "last_fired": 0 if rearm else existing["last_fired"],
         "fired_count": existing["fired_count"] if existing else 0,
         "updated_at": store._ts(store._now_ms()),
@@ -437,6 +460,8 @@ def _evaluate(alert: dict, bars: list[dict], drawings: dict, raw_bars=None, log:
 def _default_message(alert):
     spec = alert["spec"]
     c = COND_TEXT.get(alert["cond"], alert["cond"])
+    if alert["kind"] == "screener":
+        return f"Screen {spec.get('name', '')} ({alert['tf']}): new matches"
     if alert["kind"] == "price":
         return f"{alert['symbol']} {alert['tf']} price {c} {spec['price']}"
     if alert["kind"] == "drawing":
@@ -517,11 +542,12 @@ def run_once() -> int:
     if not rows:
         return 0
     alerts_ = _due_alerts([dict(_row_out(r), user_id=r["user_id"]) for r in rows])
+    fired_total = _run_screener_alerts([a for a in alerts_ if a["kind"] == "screener"])
     groups: dict[tuple, list] = {}
     for a in alerts_:
-        groups.setdefault((a["symbol"], a["tf"]), []).append(a)
+        if a["kind"] != "screener":
+            groups.setdefault((a["symbol"], a["tf"]), []).append(a)
 
-    fired_total = 0
     for (symbol, tf), group in groups.items():
         sec = market.TIMEFRAMES[tf]
         oldest = min(a["last_bar"] for a in group)
@@ -616,6 +642,79 @@ def run_once() -> int:
             }
             ch.insert(f"{DB}.alerts", [row])
     return fired_total
+
+
+def _finish(a: dict, fired: list, new_last: int, deactivate: bool, msg: str, symbol: str, payload: dict) -> int:
+    """Record a pass of one alert: events, log, notifications, the alert row (skipped when the user changed the
+    alert meanwhile). fired = [(bar_time, price)]."""
+    cur = ch.query(f"SELECT toUnixTimestamp64Milli(updated_at) AS u FROM {DB}.alerts FINAL "
+                   f"WHERE user_id = {{u:String}} AND id = {{i:String}} AND deleted = 0 AND active = 1",
+                   {"u": a["user_id"], "i": a["id"]})
+    if not cur or int(cur[0]["u"]) != a["updated_ms"]:
+        return 0
+    base = dict(user_id=a["user_id"], alert_id=a["id"], symbol=symbol, tf=a["tf"], summary=msg)
+    if fired:
+        ch.insert(f"{DB}.alert_events", [{
+            "user_id": a["user_id"], "alert_id": a["id"], "symbol": symbol, "tf": a["tf"],
+            "bar_time": t, "price": p, "message": msg} for t, p in fired])
+        t, p = fired[-1]
+        try:
+            log_many([dict(base, event="triggered", price=fp, bar_time=int(ft)) for ft, fp in fired]
+                     + [dict(base, event="delivered", channel="app", price=p, bar_time=int(t), detail="in-app notification")])
+        except Exception:
+            traceback.print_exc()
+
+        def delivered(result, base=base, t=t, p=p):
+            log_many([dict(base, event="delivered" if r == "ok" else "failed", channel=c, ok=int(r == "ok"),
+                           price=p, bar_time=int(t), detail="" if r == "ok" else r) for c, r in result.items()])
+        notify.dispatch(a["user_id"], a["channels"], f"🔔 {payload.get('title', symbol)} alert", msg,
+                        {"alert_id": a["id"], "symbol": symbol, "tf": a["tf"], "kind": a["kind"], "cond": a["cond"],
+                         "bar_time": t, "price": p, "message": msg, "count": len(fired), **payload}, on_result=delivered)
+    stop = deactivate or (fired and a["frequency"] == "once")
+    if stop:
+        reason = "triggered (frequency: once)" if fired and not deactivate else payload.get("reason", "deleted")
+        try:
+            log_many([dict(base, event="deactivated", detail=reason)])
+        except Exception:
+            traceback.print_exc()
+    ch.insert(f"{DB}.alerts", [{
+        "user_id": a["user_id"], "id": a["id"], "symbol": a["symbol"], "tf": a["tf"], "kind": a["kind"],
+        "cond": a["cond"], "spec": json.dumps(a["spec"], separators=(",", ":")),
+        "frequency": a["frequency"], "message": a["message"], "channels": json.dumps(a["channels"]),
+        "active": 0 if stop else 1, "last_bar": new_last,
+        "last_fired": fired[-1][0] if fired else a["last_fired"],
+        "fired_count": a["fired_count"] + len(fired),
+        "created_at": f"{a['created_ms'] // 1000}.{a['created_ms'] % 1000:03d}",
+        "updated_at": store._ts(max(store._now_ms(), a["updated_ms"] + 1)),
+    }])
+    return len(fired)
+
+
+def _run_screener_alerts(lst: list[dict]) -> int:
+    """Screener alerts: one screen run per (user, screen) and pass; fires on a new closed bar with new matches."""
+    total = 0
+    for a in lst:
+        sc = screener.get_screen(a["user_id"], a["spec"].get("screen_id", ""))
+        if not sc:
+            total += _finish(a, [], a["last_bar"], True, a["message"] or _default_message(a), a["symbol"],
+                             {"reason": "the saved screen was deleted"})
+            continue
+        try:
+            res = screener.run(a["user_id"], sc["spec"], timeout=60)
+        except Exception as e:
+            print(f"screener alert {a['id']}: {e}", file=sys.stderr)
+            continue
+        t = res.get("time")
+        if not t or t <= a["last_bar"]:
+            continue
+        new = [r for r in res["rows"] if r["entered"]]
+        a = {**a, "tf": sc["spec"]["tf"], "spec": {**a["spec"], "name": sc["name"]}}
+        names = ", ".join(r["symbol"].rpartition(":")[2] for r in new[:30]) + (f" and {len(new) - 30} more" if len(new) > 30 else "")
+        msg = (a["message"] + "\n" if a["message"] else "") + f"Screen {sc['name']} ({a['tf']}): {len(new)} new: {names}"
+        fired = [(t, new[0]["close"])] if new else []
+        total += _finish(a, fired, t, False, msg, new[0]["symbol"] if new else a["symbol"],
+                         {"title": f"Screen {sc['name']}", "symbols": [r["symbol"] for r in new]})
+    return total
 
 
 def start_engine() -> None:

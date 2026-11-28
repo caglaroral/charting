@@ -290,6 +290,7 @@ export function alertSummary(a) {
   const sp = a.spec || {};
   if (a.kind === 'price') return `Price ${condText(a.cond)} ${sp.price} (${a.tf})`;
   if (a.kind === 'drawing') return `Drawing (${sp.tool || '?'}) ${condText(a.cond)} (${a.tf})`;
+  if (a.kind === 'screener') return `Screen "${sp.name || '?'}": new matches (${a.tf})`;
   const tgt = sp.target || {};
   const rhs = a.cond === 'signal' ? '' : tgt.type === 'plot' ? tgt.plot : tgt.value;
   return `${sp.name || sp.type} · ${sp.plot} ${condText(a.cond)} ${rhs ?? ''} (${a.tf})`;
@@ -305,13 +306,13 @@ function renderAlerts() {
     } });
     list.append(el('div', { class: `al-item ${a.active ? '' : 'paused'}`, 'data-alert': a.id },
       sw,
-      el('div', { class: 'al-main', onclick: () => { if (a.symbol !== S.symbol) app.setSymbol(a.symbol); } },
-        el('div', { class: 'al-title' }, `${app.symbolName(a.symbol)} `, el('span', { class: 'muted', style: { fontWeight: 400 } }, a.active ? '' : (a.fired_count ? '· triggered' : '· paused'))),
+      el('div', { class: 'al-main', onclick: () => { if (a.kind === 'screener') app.openBottomPanel?.('screener'); else if (a.symbol !== S.symbol) app.setSymbol(a.symbol); } },
+        el('div', { class: 'al-title' }, a.kind === 'screener' ? 'Screener ' : `${app.symbolName(a.symbol)} `, el('span', { class: 'muted', style: { fontWeight: 400 } }, a.active ? '' : (a.fired_count ? '· triggered' : '· paused'))),
         el('div', { class: 'al-desc' }, alertSummary(a)),
         a.message ? el('div', { class: 'al-desc' }, `“${a.message}”`) : null,
         el('div', { class: 'al-desc' }, `${a.frequency === 'once' ? 'Once' : 'Once per bar'} · triggered ${a.fired_count}×`)),
       el('button', { class: 'lg-act', title: 'History', 'data-testid': 'al-history', html: ICONS.history, onclick: () => dialogs.alertLog(app, { alertId: a.id }) }),
-      el('button', { class: 'lg-act', title: 'Edit', html: ICONS.gear, onclick: () => dialogs.alertDialog(app, { alert: a }) }),
+      a.kind === 'screener' ? null : el('button', { class: 'lg-act', title: 'Edit', html: ICONS.gear, onclick: () => dialogs.alertDialog(app, { alert: a }) }),
       el('button', { class: 'lg-act', title: 'Delete', 'data-testid': 'al-delete', html: ICONS.close, onclick: async () => {
         if (!(await dialogs.confirm('Delete this alert?', { ok: 'Delete', danger: true }))) return;
         await api.deleteAlert(a.id); await loadAlerts(); loadLog();
@@ -374,7 +375,8 @@ async function pollEvents() {
     if (!events.length) return;
     since = Math.max(since, ...events.map(e => e.created_ms));
     for (const ev of events.slice().reverse()) {
-      toast(ev.message, 'alert', `🔔 ${app.symbolName(ev.symbol)} @ ${fmtQuote(ev.price)}`, 10000);
+      const isScreen = (S.alerts || []).some(a => a.id === ev.alert_id && a.kind === 'screener');
+      toast(ev.message, 'alert', isScreen ? '🔔 Screener' : `🔔 ${app.symbolName(ev.symbol)} @ ${fmtQuote(ev.price)}`, 10000);
       if ('Notification' in window && Notification.permission === 'granted') {
         try { new Notification(`🔔 ${app.symbolName(ev.symbol)}`, { body: ev.message }); } catch { /* */ }
       }

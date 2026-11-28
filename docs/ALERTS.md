@@ -9,6 +9,7 @@ Alerts are evaluated by the backend, so they keep working (and notify) while no 
 | Price | a price level | **Alert** button, Alerts tab, `Alt+A` |
 | Drawing | trend line, ray, extended line, horizontal line/ray, cross line, rectangle, parallel channel — the alert reads the drawing's **current** geometry, so moving the drawing moves the alert | 🔔 in the drawing toolbar |
 | Indicator | any plot of a built-in or custom indicator vs. a value or another plot; or a custom `plotshape()` signal | `…` → *Add alert…* on the indicator legend |
+| Screener | a saved screen: fires on a closed bar of the screen's timeframe when symbols **newly** match (the message lists them) | **Alert** in the Screener ([SCREENER.md](SCREENER.md)) |
 
 Conditions: *crossing, crossing up, crossing down, greater than, less than, closed above, closed below,
 entering channel, exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once per bar*.

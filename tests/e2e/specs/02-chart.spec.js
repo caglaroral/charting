@@ -168,6 +168,7 @@ test('TC-CHART-11 changing the timeframe keeps the date on screen (history is lo
     const i = __app.S.view.findIndex(b => b.time - __app.S.tzOffset >= t);
     __app.chart.timeScale().setVisibleLogicalRange({ from: i - 40, to: i + 40 });
   }, target);
+  await page.waitForFunction(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return r && Math.round(r.to - r.from) === 80; });
   const d = await center();
   expect(Math.abs(d.t - target)).toBeLessThanOrEqual(86400);
   for (const [tf, sec] of [['4h', 14400], ['15m', 900]]) {
@@ -177,6 +178,9 @@ test('TC-CHART-11 changing the timeframe keeps the date on screen (history is lo
   }
   // at the latest bar the chart stays at the latest bar
   await page.evaluate(() => { const n = __app.S.view.length; __app.chart.timeScale().setVisibleLogicalRange({ from: n - 60, to: n + 5 }); });
+  // LWC applies a range set through the API on its next frame (a user's scroll applies at once); wait for it,
+  // or a loaded machine switches with the previous range
+  await page.waitForFunction(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return r && r.to > __app.S.view.length; });
   await page.evaluate(() => __app.setTf('1h'));
   await page.waitForFunction(() => __app.S.tf === '1h');
   await expect.poll(() => page.evaluate(() => { const r = __app.chart.timeScale().getVisibleLogicalRange(); return Math.round(r.to - (__app.S.view.length - 1)); })).toBe(6);

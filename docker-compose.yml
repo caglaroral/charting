@@ -9,6 +9,7 @@ services:
       HOST: 0.0.0.0
       PORT: 8080
       JSRUN_SOCKET: /run/jsrun/jsrun.sock
+      BACKTESTER_URL: http://backtester:8090
     # Mount .env so SECRET_KEY generated on first start is persisted on the host
     volumes:
       - ./.env:/app/.env
@@ -34,6 +35,23 @@ services:
     pids_limit: 64
     volumes:
       - jsrun:/run/jsrun
+    restart: unless-stopped
+
+  # Backtest engine (numpy / numba / TA-Lib): screener, strategy tester, paper trading. Reached only by the
+  # backend on the compose network (no published port). Reads ClickHouse with the data source settings the
+  # backend sends per request (SELECT only); gets no secrets in its environment. Network: ClickHouse and the
+  # exchange REST API (top-up of symbols missing from the recent 1m table).
+  backtester:
+    build:
+      context: .
+      dockerfile: docker/backtester.Dockerfile
+    read_only: true
+    tmpfs:
+      - /cache:uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1500m
+    pids_limit: 64
     restart: unless-stopped
 
   frontend:

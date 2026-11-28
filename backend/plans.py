@@ -22,25 +22,34 @@ LIMITS = {
     "watchlists": ("Watchlists", "int"),
     "watchlist_symbols": ("Symbols per watchlist", "int"),
     "indicators_per_chart": ("Indicators per chart", "int"),
+    "saved_screens": ("Saved screens", "int"),
+    "screener_alerts": ("Screener alerts allowed", "bool"),
+    "backtest_symbols": ("Symbols per backtest run", "int"),
+    "paper_trades": ("Paper-trading strategies", "int"),
+    "paper_symbols": ("Symbols per paper-trading strategy", "int"),
 }
 
 DEFAULT_PLANS = [
     {"id": "free", "name": "Free", "sort": 0, "limits": {
         "active_alerts": 5, "indicator_alerts": True, "custom_indicator_alerts": False,
         "alert_channels": ["app", "telegram"], "alert_interval_sec": 60, "custom_scripts": 3,
-        "watchlists": 2, "watchlist_symbols": 30, "indicators_per_chart": 5}},
+        "watchlists": 2, "watchlist_symbols": 30, "indicators_per_chart": 5,
+        "saved_screens": 5, "screener_alerts": False, "backtest_symbols": 5, "paper_trades": 1, "paper_symbols": 10}},
     {"id": "pro", "name": "Pro", "sort": 1, "limits": {
         "active_alerts": 50, "indicator_alerts": True, "custom_indicator_alerts": True,
         "alert_channels": ["app", "telegram", "email", "webhook"], "alert_interval_sec": 20, "custom_scripts": 25,
-        "watchlists": 10, "watchlist_symbols": 200, "indicators_per_chart": 15}},
+        "watchlists": 10, "watchlist_symbols": 200, "indicators_per_chart": 15,
+        "saved_screens": 50, "screener_alerts": True, "backtest_symbols": 30, "paper_trades": 10, "paper_symbols": 100}},
     {"id": "premium", "name": "Premium", "sort": 2, "limits": {
         "active_alerts": 400, "indicator_alerts": True, "custom_indicator_alerts": True,
         "alert_channels": ["app", "telegram", "email", "webhook"], "alert_interval_sec": 20, "custom_scripts": 100,
-        "watchlists": 50, "watchlist_symbols": 1000, "indicators_per_chart": 30}},
+        "watchlists": 50, "watchlist_symbols": 1000, "indicators_per_chart": 30,
+        "saved_screens": 200, "screener_alerts": True, "backtest_symbols": 100, "paper_trades": 50, "paper_symbols": 500}},
     {"id": "unlimited", "name": "Unlimited", "sort": 3, "limits": {
         "active_alerts": None, "indicator_alerts": True, "custom_indicator_alerts": True,
         "alert_channels": ["app", "telegram", "email", "webhook"], "alert_interval_sec": 20, "custom_scripts": None,
-        "watchlists": None, "watchlist_symbols": None, "indicators_per_chart": None}},
+        "watchlists": None, "watchlist_symbols": None, "indicators_per_chart": None,
+        "saved_screens": None, "screener_alerts": True, "backtest_symbols": None, "paper_trades": None, "paper_symbols": None}},
 ]
 
 
@@ -110,8 +119,14 @@ def plan_of(user) -> dict:
     return plans.get(pid) or plans.get("free") or {"id": "free", "name": "Free", "limits": {}}
 
 
+_DEFAULTS = {p["id"]: p["limits"] for p in DEFAULT_PLANS}
+
+
 def limits_of(user) -> dict:
-    return plan_of(user)["limits"]
+    """The plan's limits; a limit the stored plan predates takes the default plan's value of the same id
+    (none for a custom plan = unlimited)."""
+    p = plan_of(user)
+    return {**_DEFAULTS.get(p["id"], {}), **p["limits"]}
 
 
 def check_count(user, key: str, current: int, what: str) -> None:

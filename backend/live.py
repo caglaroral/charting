@@ -142,3 +142,27 @@ def symbols(provider: str) -> list[str]:
     with _sym_lock:
         _sym_cache[provider] = (time.time(), syms)
     return syms
+
+
+_tick_lock = threading.Lock()
+_tick_cache: dict = {}
+TICKER_TTL = 60
+
+
+def tickers(provider: str) -> dict:
+    """24h statistics of every symbol in one request ({symbol: {last, chgp, qvol}}), cached TICKER_TTL seconds.
+    Weight 40 (futures) / 80 (spot) per request, so at most one request per minute per provider."""
+    with _tick_lock:
+        c = _tick_cache.get(provider)
+        if c and time.time() - c[0] < TICKER_TTL:
+            return c[1]
+    try:
+        rows = _get(provider, "/ticker/24hr", timeout=20)
+        out = {r["symbol"]: {"last": float(r["lastPrice"]), "chgp": float(r["priceChangePercent"]),
+                             "qvol": float(r["quoteVolume"])} for r in rows}
+    except LiveError as e:
+        print(f"ticker {provider}: {e}")
+        out = c[1] if c else {}
+    with _tick_lock:
+        _tick_cache[provider] = (time.time(), out)
+    return out

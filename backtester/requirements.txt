@@ -1,0 +1,5 @@
+# Python 3.11+. Pinned to the versions the engine's parity check against the Node engine ran with (2026-11-28).
+# TA-Lib >= 0.6 wheels bundle the TA-Lib C library.
+numpy==2.5.4
+TA-Lib==0.8.2
+numba==0.68.0

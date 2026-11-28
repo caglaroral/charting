@@ -7,6 +7,7 @@ import { ScriptSandbox } from './sandbox.js';
 import { restKlines, klineStream, PROVIDERS, connectionCount } from './live.js';
 import { initPanels } from './panels.js';
 import * as dialogs from './dialogs.js';
+import { initScreener } from './screener.js';
 import { initMobile, renderDrawToolbar } from './mobile.js';
 
 const LWC = window.LightweightCharts;
@@ -114,6 +115,7 @@ const S = app.S;
 app.fmtPrice = (p) => (p == null || Number.isNaN(p) ? '—' : Number(p).toFixed(S.priceDecimals));
 app.tfSec = () => TF_SEC[S.tf];
 app.TF_SEC = TF_SEC; app.TF_NAME = TF_NAME;
+app.fmtTime = fmtTime;
 app.symbolName = (key) => (key || '').split(':').pop();
 app.symbolSource = (key) => ((key || '').includes(':') ? key.split(':')[0] : '');
 
@@ -196,6 +198,7 @@ async function start() {
   buildLeftTools();
   buildBottombar();
   initPanels(app);
+  initScreener(app);
   initMobile(app, { GROUPS, TOOLS, toolIcon: TOOL_ICON_FOR, svg, renderLeftActive, applyScaleMode, screenshot, userMenuItems, dialogs });
   bindKeys();
   if (!S.symbol) {
@@ -390,6 +393,7 @@ function setMainData(full = true) {
   if (full || TRANSFORMED.has(S.chartType) || S.chartType === 'heikin' || S.chartType === 'volcandles' || S.chartType === 'columns') {
     app.mainSeries.setData(md);
     extraMainData();
+    if (full) app.emit('barsLoaded'); // full data set (symbol, timeframe, history, chart type): series markers are re-applied
   } else if (md.length) {
     app.mainSeries.update(md[md.length - 1]);
     if (S.chartType === 'hlcarea') {
