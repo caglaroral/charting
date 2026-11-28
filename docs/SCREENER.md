@@ -46,6 +46,9 @@ Screens and strategies share one condition format:
 **Screener tab** (right panel, next to Watchlist and Alerts; on phones ☰ → Screen results): the symbols matching
 the active screen (the one open in the screener) with price and 24h change, in the screen's sort order, refreshed
 every minute while the tab is visible. A click opens the symbol; the tab's menu opens a saved screen or the screener.
+The gear button chooses the tab's columns (price, 24h change, 24h volume, regime, and any value of the screen: its
+conditions' and columns' indicators); a click on a column header sorts by it (again: reverse). Columns and sort are
+saved with the user's chart layout (`screenTab`); without a sort of its own the tab follows the screen's.
 
 Data: the history tables of the data source plus, when configured, its **recent 1m table** (merged after the last
 history bar), so screens run on today's bars. Symbols missing from the recent table are topped up from the
@@ -88,6 +91,8 @@ The recent table's own delay applies (e.g. a table filled every ~10 minutes dela
   Short), exits circles labelled TP or SL with the net, and each trade's stop (red) and take profit (green) are
   dashed lines from its entry to its exit. The legend row shows trades, net, win rate and profit factor, with Hide,
   Report, Edit (opens it in the tester) and Remove. A saved strategy on the chart follows its later saves.
+- **Indicators dialog**: saved strategies are listed under *My strategies*; a click adds the strategy to the chart
+  and opens it in the Strategy Tester as the active strategy (on phones the tester is only loaded, the chart stays).
 
 **Saved per user**: saved screens, saved strategies, paper-trading strategies and their trades, and screener alerts
 are rows of the user in ClickHouse. The strategy on the chart and the active screen (the one open in the screener,

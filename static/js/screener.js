@@ -392,6 +392,14 @@ function strategyLegend() {
       el('button', { class: 'lg-act', title: 'Remove from the chart', 'data-testid': 'cs-remove', html: ICONS.trash.replace(/16/g, '14'), onclick: removeFromChart })));
 }
 
+/** A saved strategy picked in the Indicators dialog: on the chart, and the active strategy of the tester. */
+async function applySavedStrategy(sc) {
+  addToChart({ id: sc.id, name: sc.name, strategy: sc.spec.strategy, size: sc.spec.size });
+  if (views.tester) views.tester.openSaved(sc);
+  else ls.set('st.cur', { id: sc.id, name: sc.name, spec: JSON.parse(JSON.stringify(sc.spec)) });
+  if (!document.body.classList.contains('mobile')) await openPanel('tester');
+}
+
 async function openChartReport() {
   if (!chartRun?.r) return toast(chartRun?.error || 'The strategy has not run yet', 'error');
   await openPanel('tester');
@@ -631,6 +639,8 @@ export function initScreener(a) {
   }
   chartStrat = S.chartStrategy;
   app.legendExtra = strategyLegend;
+  app.savedStrategies = async () => (await api.strategies()).strategies;
+  app.applySavedStrategy = applySavedStrategy;
   initScreenTab();
   // the strategy on the chart follows the chart: new symbol / timeframe / history, and new bars
   let rt = null;
@@ -907,33 +917,82 @@ function initScreenTab() {
     if (!cur.spec || running) return;
     running = true;
     status.textContent = 'Scanning…';
-    try { publishScreen(cur, await api.screenerRun(cur.spec)); lastResults = screenRes.res.rows.map(x => x.symbol); } catch (e) { status.textContent = e.message; }
+    try { await ensureMeta().catch(() => null); publishScreen(cur, await api.screenerRun(cur.spec)); lastResults = screenRes.res.rows.map(x => x.symbol); } catch (e) { status.textContent = e.message; }
     finally { running = false; }
   };
   screenTabHead = () => nameBtn.replaceChildren(el('span', {}, activeScreen().name || 'Unsaved screen'), el('span', { html: ICONS.caret }));
+  // columns and sort of this tab, saved with the chart layout (S.screenTab = {cols: [key], sort: {key, dir} | null});
+  // keys: last, chg24, qvol24, regime, or 'op:<label>' for a value of the screen (its conditions and columns)
+  const FIXED = [['last', 'Price'], ['chg24', 'Chg 24h'], ['qvol24', 'Vol 24h'], ['regime', 'Regime']];
+  const cfg = () => ({ cols: ['last', 'chg24'], sort: null, ...(S.screenTab || {}) });
+  const saveCfg = (c) => { S.screenTab = c; app.saveLayout(); screenTabRender(); };
+  const opCols = (r) => (r?.operands || []).map((o, i) => { const l = opLabel(engineToApp(o)); return [`op:${l}`, l, i]; });
+  const head = el('div', { class: 'wl-cols rs-cols', 'data-testid': 'rs-head' });
+  const colsBtn = el('button', { class: 'tb-btn icon', title: 'Columns', 'data-testid': 'rs-cols', html: ICONS.gear });
+  colsBtn.onclick = () => {
+    const ops = opCols(screenRes?.res);
+    const opt = (key, label) => {
+      const cb = el('input', { type: 'checkbox', checked: cfg().cols.includes(key) });
+      return { el: el('label', { class: 'dd-item rs-col-opt', 'data-key': key, 'data-testid': 'rs-col-opt' }, cb, label), cb, key };
+    };
+    const items = [...FIXED.map(([k, l]) => opt(k, l)), ...ops.map(([k, l]) => opt(k, l))];
+    for (const it of items) {
+      it.cb.onchange = () => {
+        const c = cfg();
+        const cols = c.cols.filter(k => k !== it.key);
+        if (it.cb.checked) cols.push(it.key);
+        // keep the order of the menu
+        const order = items.map(x => x.key);
+        cols.sort((x, y) => (order.indexOf(x) + 1 || 999) - (order.indexOf(y) + 1 || 999));
+        saveCfg({ ...c, cols, sort: c.sort && c.sort.key !== it.key || it.cb.checked ? c.sort : null });
+      };
+    }
+    showMenu(colsBtn, [{ title: 'Columns' }, ...items.slice(0, FIXED.length).map(x => ({ el: x.el })),
+      ...(ops.length ? [{ title: 'Values of the screen' }, ...items.slice(FIXED.length).map(x => ({ el: x.el }))] : [])], { align: 'right' });
+  };
   screenTabRender = () => {
     screenTabHead();
     const cur = activeScreen();
     if (!cur.spec) {
       status.textContent = '';
+      head.replaceChildren();
       list.replaceChildren(el('div', { class: 'wl-empty' }, 'No screen yet. ', el('a', { href: '#', onclick: (e) => { e.preventDefault(); openPanel('screener'); } }, 'Open the screener')));
       return;
     }
     if (!screenRes || screenRes.sig !== screenSig(cur.spec)) { list.replaceChildren(); status.textContent = ''; return; }
     const r = screenRes.res;
-    const sk = cur.spec.sort || { key: 'qvol24', dir: -1 };
-    const val = (x) => (sk.key === 'symbol' ? x.symbol : sk.key === 'last' ? (x.last ?? x.close) : /^v\d+$/.test(sk.key) ? x.values[+sk.key.slice(1)] : x[sk.key]);
+    const ops = opCols(r);
+    const c = cfg();
+    const label = Object.fromEntries([...FIXED, ...ops.map(([k, l]) => [k, l])]);
+    const cols = c.cols.filter(k => label[k]);
+    const opIdx = Object.fromEntries(ops.map(([k, , i]) => [k, i]));
+    const val = (x, k) => (k === 'symbol' ? x.symbol : k === 'last' ? (x.last ?? x.close) : k.startsWith('op:') ? x.values[opIdx[k]]
+      : /^v\d+$/.test(k) ? x.values[+k.slice(1)] : x[k]);
+    // the tab's own sort, else the screen's
+    const sk = c.sort && (c.sort.key === 'symbol' || label[c.sort.key]) ? c.sort : (cur.spec.sort || { key: 'qvol24', dir: -1 });
     const rows = r.rows.slice().sort((x, y) => {
-      const a = val(x), b = val(y);
+      const a = val(x, sk.key), b = val(y, sk.key);
       if (a == null) return 1; if (b == null) return -1;
       return (typeof a === 'string' ? a.localeCompare(b) : a - b) * sk.dir;
     });
+    const grid = { gridTemplateColumns: `minmax(${cols.length > 3 ? 70 : 0}px, 1.3fr) repeat(${cols.length}, minmax(0, 1fr))` };
+    $('#tab-screen').classList.toggle('wl-dense', cols.length > 3);
+    const th = (k, l) => el('span', { class: `rs-th ${sk.key === k ? 'sorted' : ''}`, 'data-key': k, 'data-testid': 'rs-th', title: 'Sort', onclick: () => {
+      saveCfg({ ...cfg(), sort: { key: k, dir: sk.key === k ? -sk.dir : (k === 'symbol' ? 1 : -1) } });
+    } }, l, sk.key === k ? (sk.dir > 0 ? ' ▲' : ' ▼') : '');
+    head.replaceChildren(th('symbol', 'Symbol'), ...cols.map(k => th(k, label[k])));
+    Object.assign(head.style, grid);
+    const cell = (x, k) => {
+      const v = val(x, k);
+      if (k === 'chg24') return el('span', { class: cls(v) }, v != null ? fmtPct(v) : '');
+      if (k === 'regime') return el('span', {}, v ? el('span', { class: `regime ${v}` }, v) : '—');
+      return el('span', {}, fmtVal(v));
+    };
     status.textContent = `${r.rows.length} match · ${cur.spec.tf} · bar ${r.time ? fmtDT(r.time) : '—'}`;
     list.replaceChildren(...rows.map(x => el('div', { class: `wl-row rs-row ${x.symbol === S.symbol ? 'active' : ''}`, 'data-sym': x.symbol, title: x.symbol,
-      onclick: () => app.setSymbol(x.symbol) },
+      style: grid, onclick: () => app.setSymbol(x.symbol) },
     el('span', { class: 'wl-sym' }, app.symbolName(x.symbol), x.entered ? el('span', { class: 'new-dot', title: 'New match on this bar' }) : null),
-    el('span', { class: 'wl-last' }, fmtVal(x.last ?? x.close)),
-    el('span', { class: `wl-chgp ${cls(x.chg24)}` }, x.chg24 != null ? fmtPct(x.chg24) : ''))));
+    ...cols.map(k => cell(x, k)))));
     if (!rows.length) list.append(el('div', { class: 'wl-empty' }, 'No symbol matches the filters on the last closed bar.'));
   };
   nameBtn.onclick = async () => {
@@ -951,8 +1010,7 @@ function initScreenTab() {
     ]);
   };
   tab.append(el('div', { class: 'wl-head' }, nameBtn, el('div', { class: 'spacer' }),
-    el('button', { class: 'tb-btn icon', title: 'Refresh', 'data-testid': 'rs-refresh', onclick: run }, '↻')),
-  el('div', { class: 'wl-cols rs-cols' }, el('span', {}, 'Symbol'), el('span', {}, 'Last'), el('span', {}, 'Chg 24h')), list, status);
+    el('button', { class: 'tb-btn icon', title: 'Refresh', 'data-testid': 'rs-refresh', onclick: run }, '↻'), colsBtn), head, list, status);
   const stale = () => !screenRes || screenRes.sig !== screenSig(activeScreen().spec) || Date.now() - screenRes.at > 60000;
   app.on('rpTab', (t) => { if (t === 'screen') { screenTabRender(); if (stale()) run(); } });
   app.on('symbolChanged', () => { for (const r of list.querySelectorAll('[data-sym]')) r.classList.toggle('active', r.dataset.sym === S.symbol); });
@@ -1166,7 +1224,7 @@ function testerView() {
     }
     renderHead();
   });
-  return { el: root, showResult,
+  return { el: root, showResult, openSaved: (sc) => open(sc),
     edit: (s) => {   // from the chart legend: the strategy shown on the chart
       const sc = s.id && strategies.find(x => x.id === s.id);
       if (sc) open(sc);

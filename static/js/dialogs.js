@@ -76,9 +76,19 @@ export function indicatorPicker(app) {
   const S = app.S;
   const input = el('input', { class: 'search-input', placeholder: 'Search indicators…', 'data-testid': 'ind-search' });
   const list = el('div', { class: 'ind-list' });
+  let strategies = [];   // saved strategies of the strategy tester (screener.js): added to the chart
   const render = () => {
     const q = input.value.trim().toLowerCase();
     list.innerHTML = '';
+    const strats = strategies.filter(s => !q || s.name.toLowerCase().includes(q) || 'strategy'.includes(q));
+    if (strats.length) {
+      list.append(el('div', { class: 'ind-group' }, 'My strategies'));
+      for (const s of strats) {
+        list.append(el('div', { class: 'ind-item', 'data-strategy': s.id, 'data-testid': 'ind-strategy', title: 'Add to the chart and open in the Strategy Tester',
+          onclick: () => { m.close(); app.applySavedStrategy(s); } },
+        el('span', { html: ICONS.stats || '' }), s.name, el('span', { class: 'tag' }, `Strategy · ${s.spec.strategy?.tf || ''}`)));
+      }
+    }
     const scripts = S.scripts.filter(s => !q || s.name.toLowerCase().includes(q));
     list.append(el('div', { class: 'ind-group' }, 'My custom indicators'));
     for (const s of scripts) {
@@ -96,6 +106,7 @@ export function indicatorPicker(app) {
   input.addEventListener('input', render);
   const m = modal({ title: 'Indicators', width: '520px', body: el('div', {}, input, list) });
   render();
+  app.savedStrategies?.().then(l => { strategies = l || []; render(); }).catch(() => {});
   setTimeout(() => input.focus(), 0);
 }
 

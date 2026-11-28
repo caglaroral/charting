@@ -135,7 +135,7 @@ export function miniTickerStream(provider, onTickers) {
     const out = {};
     for (const t of arr) {
       const last = +t.c, open = +t.o;
-      out[t.s] = { last, open, chg: last - open, chgp: open ? (last / open - 1) * 100 : 0, vol24: +t.v, qvol: +t.q, time: Math.floor(t.E / 1000) };
+      out[t.s] = { last, open, high: +t.h, low: +t.l, chg: last - open, chgp: open ? (last / open - 1) * 100 : 0, vol24: +t.v, qvol: +t.q, time: Math.floor(t.E / 1000) };
     }
     onTickers(out);
   });

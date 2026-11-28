@@ -497,3 +497,12 @@ body.mobile .bp-split > div { overflow: visible; }
 #tab-screen .wl-list { flex: 1; overflow: auto; }
 .lg-strat .lg-name { color: #2962ff; font-weight: 600; }
 .lg-strat .err { color: var(--down); }
+.rs-th { cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-th:hover, .rs-th.sorted { color: var(--text); }
+.rs-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-col-opt { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.wl-th { cursor: pointer; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wl-th:hover, .wl-th.sorted { color: var(--text); }
+#wl-list .wl-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-dense .wl-row, .wl-dense .wl-cols { font-size: 11px; gap: 4px; padding: 0 6px; }
+.wl-dense .wl-row .wl-sym { font-size: 12px; }

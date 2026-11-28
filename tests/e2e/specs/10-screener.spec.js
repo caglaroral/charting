@@ -12,8 +12,8 @@ const cleanup = (page) => page.evaluate(async () => {
   for (const k of ['sc.cur', 'st.form', 'st.cur', 'bp.tab', 'chart.strategy', 'rep.page']) localStorage.removeItem(k);
   // the strategy on the chart and the active screen are saved with the chart layout
   const L = (await j('/api/settings/layout')).value;
-  if (L && (L.chartStrategy || L.activeScreen)) {
-    await fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: { ...L, chartStrategy: null, activeScreen: null } }) });
+  if (L && (L.chartStrategy || L.activeScreen || L.screenTab)) {
+    await fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: { ...L, chartStrategy: null, activeScreen: null, screenTab: null } }) });
   }
 });
 
@@ -339,7 +339,23 @@ test('TC-STRAT-01 saved strategies: save / rename / save as / open / delete; str
   await legend.hover();
   await page.click('[data-testid=cs-remove]');
   await expect(legend).toHaveCount(0);
+  // a saved strategy from the Indicators dialog: on the chart and active in the Strategy Tester
+  await page.click('[data-testid=st-menu]');
+  await page.click('[data-testid=st-new]');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/Unsaved strategy/);
+  await page.click('#btn-indicators');
+  await expect(page.locator('[data-testid=ind-strategy]')).toHaveCount(2);
+  await page.fill('[data-testid=ind-search]', 'tp6');
+  await page.locator('[data-testid=ind-strategy]', { hasText: 'e2e rsi tp6' }).click();
+  await expect(legend).toContainText('e2e rsi tp6');
+  await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi tp6$/);
+  await expect(page.locator('[data-testid=long-tp-v]')).toHaveValue('6');
+  await legend.hover();
+  await page.click('[data-testid=cs-remove]');
   // delete
+  await page.click('[data-testid=st-menu]');
+  await page.locator('[data-testid=st-open]', { hasText: 'e2e rsi 2' }).click();
   await page.click('[data-testid=st-menu]');
   await page.click('[data-testid=st-delete]');
   await page.click('[data-testid=confirm-ok]');
@@ -365,6 +381,24 @@ test('TC-SCREEN-04 right panel: the active screen\'s matches in the Screener tab
   await rows.nth(0).click();
   await page.waitForFunction((s) => __app.S.symbol === s, sym);
   await expect(rows.nth(0)).toHaveClass(/active/);
+  // columns: add Vol 24h and the screen's RSI value, remove Chg 24h; sort by RSI
+  const head = page.locator('[data-testid=rs-head]');
+  await expect(head).toHaveText(/Symbol.*Price.*Chg 24h/);
+  await page.click('[data-testid=rs-cols]');
+  await page.click('[data-testid=rs-col-opt][data-key=qvol24] input');
+  await page.click('[data-testid=rs-col-opt][data-key=chg24] input');
+  await page.locator('[data-testid=rs-col-opt]', { hasText: 'RSI(14)' }).locator('input').click();
+  await page.keyboard.press('Escape');
+  await expect(head).toHaveText(/^Symbol\s*Price\s*Vol 24h[ ▼▲]*RSI\(14\)/);
+  await page.locator('[data-testid=rs-th]', { hasText: 'RSI(14)' }).click();   // descending
+  await page.locator('[data-testid=rs-th]', { hasText: 'RSI(14)' }).click();   // ascending
+  await expect(page.locator('[data-testid=rs-th]', { hasText: 'RSI(14)' })).toHaveText(/▲/);
+  const rsi = (await page.locator('[data-testid=rs-list] .rs-row span:nth-child(4)').allTextContents()).map(parseFloat);
+  expect(rsi.length).toBeGreaterThan(1);
+  expect(rsi.every(v => v < 50)).toBeTruthy();
+  expect(rsi).toEqual(rsi.slice().sort((a, b) => a - b));
+  await expect.poll(async () => (await api(page, 'GET', '/api/settings/layout')).body.value?.screenTab, { timeout: 10_000 })
+    .toEqual({ cols: ['last', 'qvol24', 'op:RSI(14)'], sort: { key: 'op:RSI(14)', dir: 1 } });
   // the active screen is saved with the user's chart layout: back after a reload
   await expect.poll(async () => (await api(page, 'GET', '/api/settings/layout')).body.value?.activeScreen?.name, { timeout: 10_000 }).toBe('e2e tab');
   await page.reload();
@@ -372,6 +406,7 @@ test('TC-SCREEN-04 right panel: the active screen\'s matches in the Screener tab
   await page.click('[data-testid=rp-screen]');
   await expect(page.locator('[data-testid=rs-menu]')).toHaveText(/e2e tab/);
   await expect(page.locator('[data-testid=rs-status]')).toContainText(/\d+ match/, { timeout: 120_000 });
+  await expect(page.locator('[data-testid=rs-head]')).toHaveText(/^Symbol\s*Price\s*Vol 24h\s*RSI\(14\) ▲$/);
   // the screener opens the same screen
   await page.click('[data-testid=rs-menu]');
   await page.click('[data-testid=rs-edit]');

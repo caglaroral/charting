@@ -24,6 +24,8 @@ export function initPanels(a) {
     };
   }
   $('#wl-add').onclick = () => addSymbolsDialog();
+  $('#wl-colbtn').innerHTML = ICONS.gear;
+  $('#wl-colbtn').onclick = (e) => wlColumnsMenu(e.currentTarget);
   $('#al-new').onclick = () => dialogs.alertDialog(app, { kind: 'price' });
   $('#al-settings').onclick = () => dialogs.notifySettings(app);
   $('#al-log-all').onclick = () => dialogs.alertLog(app);
@@ -139,8 +141,70 @@ function addSymbolsDialog() {
   });
 }
 
+// Watchlist columns and sort: S.wlView = {cols: [key], sort: {key, dir} | null} (null sort = the list's own order,
+// which drag and drop changes), saved with the chart layout.
+const WL_COLS = [['last', 'Last'], ['chg', 'Chg'], ['chgp', 'Chg%'], ['open', 'Open'], ['high', 'High 24h'], ['low', 'Low 24h'],
+  ['vol24', 'Vol 24h'], ['qvol', 'Turnover 24h']];
+const WL_LABEL = Object.fromEntries(WL_COLS);
+const wlView = () => ({ cols: ['last', 'chg', 'chgp'], sort: null, ...(S.wlView || {}) });
+function setWlView(v) { S.wlView = v; app.saveLayout(); renderWatchlist(); }
+const wlGrid = (n) => ({ gridTemplateColumns: `minmax(${n > 3 ? 70 : 0}px, 1.4fr) repeat(${n}, minmax(0, 1fr))` });
+
+function wlCell(k, q) {
+  const v = q[k];
+  const c = q.chg > 0 ? 'up' : q.chg < 0 ? 'down' : '';
+  if (v == null) return { text: k === 'last' ? '—' : '', cls: '' };
+  if (k === 'chg') return { text: fmtQuote(v, q.last), cls: c };
+  if (k === 'chgp') return { text: `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, cls: c };
+  if (k === 'vol24' || k === 'qvol') return { text: fmtNum(v), cls: '' };
+  return { text: fmtQuote(v), cls: '' };
+}
+
+function renderWlHead() {
+  const v = wlView();
+  const head = $('#wl-cols');
+  const th = (k, label) => el('span', { class: `wl-th ${v.sort?.key === k ? 'sorted' : ''}`, 'data-key': k, 'data-testid': 'wl-th',
+    title: 'Sort (again: reverse, a third time: the list\'s own order)', onclick: () => {
+      const s = v.sort;
+      const first = k === 'symbol' ? 1 : -1;
+      const next = !s || s.key !== k ? { key: k, dir: first } : s.dir === first ? { key: k, dir: -first } : null;
+      setWlView({ ...v, sort: next });
+    } }, label, v.sort?.key === k ? (v.sort.dir > 0 ? ' ▲' : ' ▼') : '');
+  head.replaceChildren(th('symbol', 'Symbol'), ...v.cols.map(k => th(k, WL_LABEL[k])));
+  Object.assign(head.style, wlGrid(v.cols.length));
+  $('#tab-watchlist').classList.toggle('wl-dense', v.cols.length > 3);   // more columns: smaller text
+}
+
+function wlColumnsMenu(btn) {
+  const items = WL_COLS.map(([k, label]) => {
+    const cb = el('input', { type: 'checkbox', checked: wlView().cols.includes(k) });
+    cb.onchange = () => {
+      const v = wlView();
+      let cols = v.cols.filter(x => x !== k);
+      if (cb.checked) cols.push(k);
+      cols = WL_COLS.map(([x]) => x).filter(x => cols.includes(x));
+      setWlView({ ...v, cols, sort: !cb.checked && v.sort?.key === k ? null : v.sort });
+    };
+    return { el: el('label', { class: 'dd-item rs-col-opt', 'data-key': k, 'data-testid': 'wl-col-opt' }, cb, label) };
+  });
+  showMenu(btn, [{ title: 'Columns' }, ...items], { align: 'right' });
+}
+
+function sortedSymbols(wl) {
+  const s = wlView().sort;
+  if (!s) return wl.symbols;
+  const val = (sym) => (s.key === 'symbol' ? app.symbolName(sym) : S.quotes[sym]?.[s.key]);
+  return wl.symbols.slice().sort((x, y) => {
+    const a = val(x), b = val(y);
+    if (a == null) return 1; if (b == null) return -1;
+    return (typeof a === 'string' ? a.localeCompare(b) : a - b) * s.dir;
+  });
+}
+
 let dragSym = null;
+let wlOrderKey = '';
 function renderWatchlist() {
+  renderWlHead();
   const list = $('#wl-list');
   list.innerHTML = '';
   const wl = activeWl();
@@ -149,18 +213,22 @@ function renderWatchlist() {
     return;
   }
   const multiSrc = Object.keys(S.sources || {}).length > 1;
-  for (const sym of wl.symbols) {
+  const v = wlView();
+  const sorted = !!v.sort;
+  const syms = sortedSymbols(wl);
+  wlOrderKey = syms.join(',');
+  for (const sym of syms) {
     const q = S.quotes[sym] || {};
-    const cls = q.chg > 0 ? 'up' : q.chg < 0 ? 'down' : '';
     const row = el('div', {
-      class: `wl-row ${sym === S.symbol ? 'active' : ''}`, draggable: 'true', 'data-sym': sym, title: sym,
+      class: `wl-row ${sym === S.symbol ? 'active' : ''}`, draggable: sorted ? 'false' : 'true', 'data-sym': sym, title: sym,
+      style: wlGrid(v.cols.length),
       onclick: () => app.setSymbol(sym),
       ondragstart: (e) => { dragSym = sym; e.dataTransfer.effectAllowed = 'move'; },
-      ondragover: (e) => { e.preventDefault(); row.classList.add('drag-over'); },
+      ondragover: (e) => { if (sorted) return; e.preventDefault(); row.classList.add('drag-over'); },
       ondragleave: () => row.classList.remove('drag-over'),
       ondrop: async (e) => {
         e.preventDefault(); row.classList.remove('drag-over');
-        if (!dragSym || dragSym === sym) return;
+        if (sorted || !dragSym || dragSym === sym) return;
         const arr = wl.symbols.filter(s => s !== dragSym);
         arr.splice(arr.indexOf(sym), 0, dragSym);
         wl.symbols = arr; dragSym = null;
@@ -168,9 +236,7 @@ function renderWatchlist() {
       },
     },
     el('span', { class: 'wl-sym' }, app.symbolName(sym), multiSrc ? el('span', { class: 'wl-src' }, app.symbolSource(sym)) : null),
-    el('span', { class: 'wl-last' }, q.last != null ? fmtQuote(q.last) : '—'),
-    el('span', { class: `wl-chg ${cls}` }, q.chg != null ? fmtQuote(q.chg, q.last) : ''),
-    el('span', { class: `wl-chgp ${cls}` }, q.chgp != null ? `${q.chgp >= 0 ? '+' : ''}${q.chgp.toFixed(2)}%` : ''),
+    ...v.cols.map(k => { const c = wlCell(k, q); return el('span', { class: `wl-${k} ${c.cls}`, 'data-col': k }, c.text); }),
     el('button', { class: 'wl-del', title: 'Remove from list', 'data-testid': 'wl-remove', onclick: (e) => { e.stopPropagation(); removeFromWatchlist(sym); } }, '×'));
     list.append(row);
   }
@@ -182,17 +248,22 @@ function fmtQuote(v, ref = v) {
   return Number(v).toFixed(d);
 }
 
-// Update only the numeric cells (keeps hover/drag state)
+// Update only the numeric cells (keeps hover/drag state); a sorted list is re-ordered at most every 5 s
+let lastReorder = 0;
 function updateQuoteCells() {
+  const wl = activeWl();
+  if (wl && wlView().sort && Date.now() - lastReorder > 5000 && !document.querySelector('#wl-list .wl-row:hover')) {
+    lastReorder = Date.now();
+    if (sortedSymbols(wl).join(',') !== wlOrderKey) { renderWatchlist(); renderSymbolPrice(); return; }
+  }
   for (const row of document.querySelectorAll('#wl-list .wl-row')) {
     const q = S.quotes[row.dataset.sym];
     if (!q) continue;
-    const cls = q.chg > 0 ? 'up' : q.chg < 0 ? 'down' : '';
-    row.querySelector('.wl-last').textContent = q.last != null ? fmtQuote(q.last) : '—';
-    const c = row.querySelector('.wl-chg'), p = row.querySelector('.wl-chgp');
-    c.textContent = q.chg != null ? fmtQuote(q.chg, q.last) : '';
-    p.textContent = q.chgp != null ? `${q.chgp >= 0 ? '+' : ''}${q.chgp.toFixed(2)}%` : '';
-    c.className = `wl-chg ${cls}`; p.className = `wl-chgp ${cls}`;
+    for (const cell of row.querySelectorAll('[data-col]')) {
+      const c = wlCell(cell.dataset.col, q);
+      cell.textContent = c.text;
+      cell.className = `wl-${cell.dataset.col} ${c.cls}`;
+    }
   }
   renderSymbolPrice();
 }

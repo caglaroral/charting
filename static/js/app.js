@@ -190,6 +190,8 @@ async function start() {
     // the strategy on the chart and the active screen (screener.js); undefined = not in the layout yet
     chartStrategy: L.chartStrategy && typeof L.chartStrategy === 'object' ? L.chartStrategy : ('chartStrategy' in L ? null : undefined),
     activeScreen: L.activeScreen && typeof L.activeScreen === 'object' ? L.activeScreen : ('activeScreen' in L ? null : undefined),
+    screenTab: L.screenTab && typeof L.screenTab === 'object' && Array.isArray(L.screenTab.cols) ? L.screenTab : null,
+    wlView: L.wlView && typeof L.wlView === 'object' && Array.isArray(L.wlView.cols) ? L.wlView : null,
   });
   S.cursorMode = L.cursorMode || 'cross';
   S.tzOffset = tzOffsetSec(S.tz);
@@ -217,7 +219,8 @@ app.saveLayout = debounce(() => {
     symbol: S.symbol, tf: S.tf, chartType: S.chartType, indicators: S.indicators.map(i => ({ id: i.id, type: i.type, script_id: i.script_id, params: i.params, colors: i.colors, visible: i.visible, scale: i.scale, collapsed: i.collapsed })),
     tz: S.tz, magnet: S.magnet, keepDrawing: S.keepDrawing, lastTool: S.lastTool, cursorMode: app.dm?.cursorMode, favTfs: S.favTfs, wlId: S.wlId, rightPanel: S.rightPanel, scaleMode: S.scaleMode, autoScale: S.autoScale, mainPos: S.mainPos || 0,
     style: S.style,
-    chartStrategy: S.chartStrategy || null, activeScreen: S.activeScreen || null,   // screener.js
+    chartStrategy: S.chartStrategy || null, activeScreen: S.activeScreen || null, screenTab: S.screenTab || null,   // screener.js
+    wlView: S.wlView || null,   // watchlist columns and sort (panels.js)
   }).catch(e => console.warn('layout save failed', e));
 }, 800);
 

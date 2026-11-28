@@ -21,10 +21,15 @@ store and Binance as the live feed.
 - **Indicators**: 22 built-ins and user-written **custom indicators** in ChartScript
   (JavaScript with a Pine-like API, `security()` for multi-timeframe, `fill()`, `plotshape()`),
   edited in an in-browser editor and executed in a sandbox.
+- **Watchlists**: several lists, live quotes, drag to reorder; columns to choose (last, change, open, 24h high /
+  low / volume / turnover) and sort by any column (saved per user).
 - **Screener**: filters on the backtest engine's indicators on any timeframe (also other timeframes in one
-  screen), columns, the symbol's regime, 24h stats; saved screens; **screener alerts** for new matches.
-- **Strategy tester**: long / short entries, stop and take profit (% or ATR), on one symbol, a watchlist or the
-  screener results; metrics and trades on the chart. **Paper trading**: several strategies at once, forward on
+  screen), columns, the symbol's regime, 24h stats; saved screens; **screener alerts** for new matches; the
+  active screen's matches in a right-panel tab next to the watchlist (own columns and sort).
+- **Strategy tester**: long / short entries, stop and take profit (% or ATR), on one symbol, a watchlist, the
+  screener results or symbols picked in the symbol search; saved strategies; a report (equity curve,
+  performance, list of trades); a strategy **on the chart** (from the tester or the Indicators dialog) with
+  entries, exits and stop / take-profit levels. **Paper trading**: several strategies at once, forward on
   closed bars on the server, with create / edit / pause / restart / delete. See [docs/SCREENER.md](docs/SCREENER.md).
 - **Alerts**: price, drawing, indicator and screener alerts (including custom indicators) evaluated on the
   server — notifications arrive even when the browser is closed: in-app, Telegram, e-mail, webhook.
