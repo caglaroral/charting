@@ -88,6 +88,12 @@ The recent table's own delay applies (e.g. a table filled every ~10 minutes dela
   Short), exits circles labelled TP or SL with the net, and each trade's stop (red) and take profit (green) are
   dashed lines from its entry to its exit. The legend row shows trades, net, win rate and profit factor, with Hide,
   Report, Edit (opens it in the tester) and Remove. A saved strategy on the chart follows its later saves.
+
+**Saved per user**: saved screens, saved strategies, paper-trading strategies and their trades, and screener alerts
+are rows of the user in ClickHouse. The strategy on the chart and the active screen (the one open in the screener,
+with unsaved edits, shown in the Screener tab) are saved with the user's chart layout (`settings`, key `layout`),
+so they come back on any device. Only view state stays in the browser (open bottom-panel tab and height, the
+report page, the tester form in progress).
 - Limits: at most 250,000 bars per symbol and run, about 4 minutes per run.
 
 ## Paper Trading

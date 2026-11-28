@@ -236,7 +236,11 @@ function strategySummary(st) {
 let shown = null;      // {symbol, tf, trades, open}
 let markerApi = null, markerSeries = null;
 let levelSeries = [];
-let chartStrat = ls.get('chart.strategy', null);   // {id, name, strategy, size, visible}
+let chartStrat = null;   // {id, name, strategy, size, visible}: saved with the chart layout (S.chartStrategy)
+const saveChartStrat = () => { S.chartStrategy = chartStrat; app.saveLayout(); };
+// the screen open in the screener ({id, name, spec}), saved with the chart layout too (S.activeScreen)
+const getActiveScreen = () => S.activeScreen || null;
+const setActiveScreen = (cur) => { S.activeScreen = cur ? JSON.parse(JSON.stringify(cur)) : null; app.saveLayout(); };
 let chartRun = null;   // {key, symbol, tf, strategy, r, trades, open, total, error, busy}
 
 function layer() {
@@ -327,14 +331,14 @@ async function ensureMeta() {
 // ---- the strategy on the chart
 function addToChart(s) {
   chartStrat = { id: s.id || null, name: s.name || 'Strategy', strategy: JSON.parse(JSON.stringify(s.strategy)), size: s.size || 1000, visible: true };
-  ls.set('chart.strategy', chartStrat);
+  saveChartStrat();
   shown = null;
   runChartStrategy(true);
   toast(`"${chartStrat.name}" added to the chart (runs on the chart's symbol and timeframe)`, 'ok');
 }
 function removeFromChart() {
   chartStrat = null; chartRun = null;
-  ls.set('chart.strategy', null);
+  saveChartStrat();
   applyMarkers(); app.renderLegend?.();
 }
 
@@ -374,7 +378,7 @@ function strategyLegend() {
       : el('span', {}, `${m?.trades ?? 0} trades · `, el('span', { class: cls(m?.net) }, fmtMoney(m?.net ?? 0)),
         m?.win_pct != null ? ` · win ${m.win_pct.toFixed(1)}%` : '', m?.profit_factor != null ? ` · PF ${m.profit_factor.toFixed(2)}` : '');
   const vis = chartStrat.visible !== false;
-  const toggle = () => { chartStrat.visible = !vis; ls.set('chart.strategy', chartStrat); applyMarkers(); app.renderLegend?.(); };
+  const toggle = () => { chartStrat.visible = !vis; saveChartStrat(); applyMarkers(); app.renderLegend?.(); };
   return el('div', { class: `lg-ind lg-strat ${vis ? '' : 'off'}`, 'data-testid': 'chart-strategy' },
     el('span', { class: 'lg-name', title: strategySummary(chartStrat.strategy) }, `Strategy: ${chartStrat.name}`),
     el('span', { class: 'lg-vals' }, info),
@@ -618,6 +622,14 @@ export function initScreener(a) {
   const tg = $('#bp-toggles');
   for (const [id, label] of TABS) tg.append(el('button', { class: 'bb-btn', 'data-bp': id, 'data-testid': `bp-${id}`, onclick: () => openPanel(panelTab === id ? null : id) }, label));
   app.openBottomPanel = openPanel;
+  // layouts saved before these were in them: take this browser's copy once (it used to be in localStorage)
+  if (S.chartStrategy === undefined || S.activeScreen === undefined) {
+    if (S.chartStrategy === undefined) S.chartStrategy = ls.get('chart.strategy', null);
+    if (S.activeScreen === undefined) S.activeScreen = ls.get('sc.cur', null);
+    try { localStorage.removeItem('chart.strategy'); localStorage.removeItem('sc.cur'); } catch { /* */ }
+    app.saveLayout();
+  }
+  chartStrat = S.chartStrategy;
   app.legendExtra = strategyLegend;
   initScreenTab();
   // the strategy on the chart follows the chart: new symbol / timeframe / history, and new bars
@@ -689,7 +701,7 @@ function newSpec() {
 function screenerView() {
   const root = el('div', { class: 'bp-body', 'data-testid': 'screener' });
   let screens = [];
-  let cur = ls.get('sc.cur', null) || { id: null, name: '', spec: newSpec() };
+  let cur = getActiveScreen() || { id: null, name: '', spec: newSpec() };
   let saved = JSON.stringify(cur.spec);
   let res = null, running = false, timer = null, seq = 0;
   const status = el('span', { class: 'bp-status', 'data-testid': 'sc-status' });
@@ -706,7 +718,7 @@ function screenerView() {
   const table = el('div', { class: 'bp-scroll' });
 
   const dirty = () => JSON.stringify(cur.spec) !== saved;
-  const persist = () => { ls.set('sc.cur', cur); screenTabHead?.(); };
+  const persist = () => { setActiveScreen(cur); screenTabHead?.(); };
   const renderHead = () => {
     nameBtn.replaceChildren(el('span', {}, (cur.name || 'Unsaved screen') + (dirty() ? ' *' : '')), el('span', { html: ICONS.caret, style: { display: 'inline-flex', marginLeft: '4px' } }));
     tf.replaceChildren(...meta.timeframes.map(t => el('option', { value: t, selected: t === cur.spec.tf }, t)));
@@ -875,7 +887,7 @@ let screenRes = null;            // {sig, res, at}
 let screenTabHead = null, screenTabRender = null;
 const screenSig = (spec) => JSON.stringify(spec ? { ...spec, sort: null, columns: null } : null);
 function activeScreen() {
-  return views.screener ? views.screener.current() : (ls.get('sc.cur', null) || { id: null, name: '', spec: null });
+  return views.screener ? views.screener.current() : (getActiveScreen() || { id: null, name: '', spec: null });
 }
 function publishScreen(cur, res) {
   screenRes = { sig: screenSig(cur.spec), res, at: Date.now() };
@@ -932,7 +944,7 @@ function initScreenTab() {
       ...(screens.length ? [{ title: 'Saved screens' }] : []),
       ...screens.map(sc => ({ label: sc.name, active: sc.id === cur.id, testid: 'rs-open', onClick: async () => {
         if (views.screener) views.screener.load(sc);
-        else { ls.set('sc.cur', { id: sc.id, name: sc.name, spec: JSON.parse(JSON.stringify(sc.spec)) }); screenTabRender(); run(); }
+        else { setActiveScreen({ id: sc.id, name: sc.name, spec: sc.spec }); screenTabRender(); run(); }
       } })),
       { sep: true },
       { label: 'Edit in the screener', testid: 'rs-edit', onClick: () => openPanel('screener') },
@@ -1082,7 +1094,7 @@ function testerView() {
       saved = JSON.stringify(spec);
       if (chartStrat && chartStrat.id === strategy.id) {   // the chart follows the saved strategy
         chartStrat = { ...chartStrat, name: strategy.name, strategy: spec.strategy, size: spec.size };
-        ls.set('chart.strategy', chartStrat); runChartStrategy(true);
+        saveChartStrat(); runChartStrategy(true);
       }
       remember(); await loadStrategies();
       toast('Strategy saved', 'ok');
@@ -1108,13 +1120,13 @@ function testerView() {
           try {
             await api.saveStrategy({ id: st.id, name: n, spec: cur ? cur.spec : collect() });
             st.name = n; remember(); await loadStrategies();
-            if (chartStrat?.id === st.id) { chartStrat.name = n; ls.set('chart.strategy', chartStrat); app.renderLegend?.(); }
+            if (chartStrat?.id === st.id) { chartStrat.name = n; saveChartStrat(); app.renderLegend?.(); }
           } catch (e) { toast(e.message, 'error'); }
         } },
         { label: 'Delete', testid: 'st-delete', onClick: async () => {
           if (!(await confirmDialog(`Delete the strategy "${st.name}"?`, { ok: 'Delete', danger: true }))) return;
           await api.deleteStrategy(st.id);
-          if (chartStrat?.id === st.id) { chartStrat.id = null; ls.set('chart.strategy', chartStrat); }
+          if (chartStrat?.id === st.id) { chartStrat.id = null; saveChartStrat(); }
           st = { ...st, id: null, name: '' }; saved = null; remember(); await loadStrategies();
         } },
       ] : []),

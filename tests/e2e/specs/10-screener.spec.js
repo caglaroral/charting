@@ -10,6 +10,11 @@ const cleanup = (page) => page.evaluate(async () => {
   for (const s of (await j('/api/strategies')).strategies) await fetch('/api/strategies/' + s.id, { method: 'DELETE' });
   for (const a of (await j('/api/alerts')).alerts) await fetch('/api/alerts/' + a.id, { method: 'DELETE' });
   for (const k of ['sc.cur', 'st.form', 'st.cur', 'bp.tab', 'chart.strategy', 'rep.page']) localStorage.removeItem(k);
+  // the strategy on the chart and the active screen are saved with the chart layout
+  const L = (await j('/api/settings/layout')).value;
+  if (L && (L.chartStrategy || L.activeScreen)) {
+    await fetch('/api/settings/layout', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: { ...L, chartStrategy: null, activeScreen: null } }) });
+  }
 });
 
 const api = (page, method, url, body) => page.evaluate(async ([m, u, b]) => {
@@ -313,7 +318,12 @@ test('TC-STRAT-01 saved strategies: save / rename / save as / open / delete; str
   const legend = page.locator('[data-testid=chart-strategy]');
   await expect(legend).toContainText('e2e rsi 2');
   await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chart.strategy')).name)).toBe('e2e rsi 2');
+  // saved with the user's chart layout on the server: back after a reload
+  await expect.poll(async () => (await api(page, 'GET', '/api/settings/layout')).body.value?.chartStrategy?.name, { timeout: 10_000 }).toBe('e2e rsi 2');
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.bars.length > 50);
+  await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
+  await page.click('[data-testid=bp-tester]');
   // it follows a timeframe change
   await page.evaluate(() => __app.setTf ? __app.setTf('4h') : null);
   await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
@@ -355,6 +365,13 @@ test('TC-SCREEN-04 right panel: the active screen\'s matches in the Screener tab
   await rows.nth(0).click();
   await page.waitForFunction((s) => __app.S.symbol === s, sym);
   await expect(rows.nth(0)).toHaveClass(/active/);
+  // the active screen is saved with the user's chart layout: back after a reload
+  await expect.poll(async () => (await api(page, 'GET', '/api/settings/layout')).body.value?.activeScreen?.name, { timeout: 10_000 }).toBe('e2e tab');
+  await page.reload();
+  await page.waitForFunction(() => window.__app && __app.S.bars.length > 50);
+  await page.click('[data-testid=rp-screen]');
+  await expect(page.locator('[data-testid=rs-menu]')).toHaveText(/e2e tab/);
+  await expect(page.locator('[data-testid=rs-status]')).toContainText(/\d+ match/, { timeout: 120_000 });
   // the screener opens the same screen
   await page.click('[data-testid=rs-menu]');
   await page.click('[data-testid=rs-edit]');
