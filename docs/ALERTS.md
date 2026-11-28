@@ -10,6 +10,7 @@ Alerts are evaluated by the backend, so they keep working (and notify) while no 
 | Drawing | trend line, ray, extended line, horizontal line/ray, cross line, rectangle, parallel channel — the alert reads the drawing's **current** geometry, so moving the drawing moves the alert | 🔔 in the drawing toolbar |
 | Indicator | any plot of a built-in or custom indicator vs. a value or another plot; or a custom `plotshape()` signal | `…` → *Add alert…* on the indicator legend |
 | Screener | a saved screen: fires on a closed bar of the screen's timeframe when symbols **newly** match (the message lists them) | **Alert** in the Screener ([SCREENER.md](SCREENER.md)) |
+| Strategy | a saved strategy on one or more symbols: the server runs it forward like paper trading and fires on its **entries** (side, price, stop, take profit) and / or **exits** (TP / SL, net) | **Alert** in the Strategy Tester, 🔔 on the strategy's chart legend |
 
 Conditions: *crossing, crossing up, crossing down, greater than, less than, closed above, closed below,
 entering channel, exiting channel, signal*. Frequency: *once* (deactivates after firing) or *once per bar*.
@@ -59,6 +60,37 @@ The engine follows a drawing exactly as it is drawn on the chart:
    alert fires at most once per bar). Crossing uses the bar's high/low against the level, so
    intrabar touches count.
 6. Fired alerts are written to `alert_events` and delivered to the selected channels.
+
+### Screener alerts
+
+- Created on a **saved** screen (the screen is saved first). The alert follows later saves of the screen and
+  stops when the screen is deleted.
+- On each engine pass the backend runs the screen (the backtester answers from its in-memory cache, so a run
+  costs milliseconds) and looks at the bar it was evaluated on: the last **closed** bar of the screen's timeframe
+  that most symbols have. Nothing happens until that bar is newer than the alert's `last_bar` (set to the last
+  closed bar when the alert is created, so existing matches never fire).
+- On a new closed bar, the **new matches** are the symbols that match on this bar and did not on the bar before
+  (the blue dot in the screener). If there are any, one notification lists them (up to 30 names, then "and N
+  more"); the alert's `last_bar` moves to this bar either way.
+- *Every bar with new matches* (once per bar) keeps going; *Only once* deactivates after the first notification.
+- Timing: a bar is evaluated once its data has arrived: with the recent 1m table filled every ~10 minutes, 1m and
+  5m screens notify up to that much later; for 1h and above it is a small part of the bar.
+
+### Strategy alerts
+
+- Created on a **saved** strategy with its symbols (the tester's symbols, or the chart's symbol from the legend)
+  and the orders to notify: entries, exits or both.
+- The engine steps the strategy every 30 s per alert through the backtester's paper-trading step: per symbol,
+  from the first bar after the alert was armed, on closed bars of the strategy's timeframe, with the backtest
+  rules (signal at a bar's close, fill at the next open, one position per symbol, stop / take profit with the
+  stop winning on a double touch). The open position per symbol is kept in the alert (`spec.state`).
+- A pass with new orders sends one notification listing them, e.g. `Long entry BTCUSDT at 59500 · stop 58310 ·
+  TP 61880` and `Long exit BTCUSDT at 58263 (SL): -22.17`; the net is for the strategy's size per trade.
+- Saving the strategy again restarts the alert from then (positions of the old version are dropped); deleting it
+  deactivates the alert. Editing the alert's symbols restarts it too; changing only the channels, message or
+  trigger keeps the positions.
+- Allowed by plan (`strategy_alerts`); the symbols per alert follow `paper_symbols`.
+
 
 ## Notifications
 

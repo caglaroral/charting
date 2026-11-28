@@ -61,6 +61,7 @@ also offers a permanent purge of the user and all their rows: `DELETE /api/admin
 | Saved screens | 5 | 50 | 200 | ∞ |
 | Saved strategies | 5 | 50 | 200 | ∞ |
 | Screener alerts | – | ✓ | ✓ | ✓ |
+| Strategy alerts | – | ✓ | ✓ | ✓ |
 | Symbols per backtest run | 5 | 30 | 100 | ∞ |
 | Paper-trading strategies (running) | 1 | 10 | 50 | ∞ |
 | Symbols per paper-trading strategy | 10 | 100 | 500 | ∞ |

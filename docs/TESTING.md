@@ -85,6 +85,7 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 | TC-SCREEN-04 | Screener tab | Saved screen picked in the right panel's Screener tab; click a row; Edit in the screener | Matches with the bar time; the symbol opens and is highlighted; columns (+ Vol 24h, + RSI(14), − Chg 24h) and RSI sort ascending, saved and restored; the active screen is in the layout and back after a reload; the screener opens the same screen |
 | TC-TEST-01 | Strategy tester | Run without entry; RSI(14) < 30 long 1h, 2% / 4%; report pages; a symbol row and a trade; free user with 6 symbols | Error shown; overview with equity curve, performance (all / long / short), list of trades = trade count with TP / SL, per-symbol row; chart on 1h; free → 402 |
 | TC-STRAT-01 | Saved strategies, chart | Symbols from the symbol search (add, toggle off); save, rename, edit (`*`), save as, open, delete; Add to chart, reload, timeframe change, report, hide, remove; the other strategy from the Indicators dialog; invalid strategy | Spec stored with symbols and size; the chart strategy is in the layout and back after a reload; the legend shows the strategy's trades on the chart's symbol and timeframe (also after a switch to 4h); report "(chart)"; from the Indicators dialog it is on the chart and active in the tester (TP 6%); invalid → 400 |
+| TC-STRAT-02 | Strategy alert | Alert from the tester on a saved strategy (entries only), edit (+ exits, + DOGEUSDT); free user | Listed as "Strategy … entries on BTCUSDT (1h)" (`kind: strategy`, `cond: order`, empty state); edited to 2 symbols (`BINANCE:*`); free → 402 |
 | TC-PAPER-01 | Paper trading | Create (1m, BTCUSDT + DOGEUSDT picked in the symbol search), wait for the engine, rename, change size, pause, resume, restart, details, delete; free user: two strategies | Running, state for both symbols within 2 min; rename keeps run 1, size → run 2, resume → 3, restart → 4; deleted; free: 2nd → 402 |
 | TC-ADMIN-01 | Data sources | Edit source, Test connection, Scan tables | Connected, OHLC tables listed |
 | TC-ADMIN-02 | Admin | Plans and Users dialogs; non-admin menu | Limits shown, plan assigned, no admin menu for users |
@@ -94,6 +95,10 @@ python3 -m unittest tests/backend/test_alert_geometry.py
 
 - Screener alert delivery: a screen on 1m (e.g. Close crosses up EMA(20)) with an alert fires once the recent 1m
   table has the next bars (its delay applies); the Alerts tab log shows the trigger with the new symbols.
+- Strategy alert delivery: a 1m strategy that is always long (RSI(14) > 0, stop / TP 0.2%) on BTCUSDT and DOGEUSDT;
+  within a few minutes the alert lists entries and TP / SL exits. Server-side shortcut: move `spec.started` of the
+  alert back a few hours and call `alerts._run_strategy_alerts` (checked on 2026-11-28: one notification with the
+  entries and exits, no second one without a new bar).
 
 - Telegram / e-mail delivery: configure *Notification servers*, then **Send test** in
   *user menu → Notifications*.

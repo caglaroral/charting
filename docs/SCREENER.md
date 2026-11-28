@@ -91,6 +91,8 @@ The recent table's own delay applies (e.g. a table filled every ~10 minutes dela
   Short), exits circles labelled TP or SL with the net, and each trade's stop (red) and take profit (green) are
   dashed lines from its entry to its exit. The legend row shows trades, net, win rate and profit factor, with Hide,
   Report, Edit (opens it in the tester) and Remove. A saved strategy on the chart follows its later saves.
+- **Alert** (tester, or 🔔 on the chart legend): notifications on the saved strategy's entries and exits, run on
+  the server on the chosen symbols; see [ALERTS.md](ALERTS.md#strategy-alerts).
 - **Indicators dialog**: saved strategies are listed under *My strategies*; a click adds the strategy to the chart
   and opens it in the Strategy Tester as the active strategy (on phones the tester is only loaded, the chart stays).
 

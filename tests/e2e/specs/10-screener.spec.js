@@ -412,3 +412,44 @@ test('TC-SCREEN-04 right panel: the active screen\'s matches in the Screener tab
   await page.click('[data-testid=rs-edit]');
   await expect(page.locator('[data-testid=sc-menu]')).toHaveText(/e2e tab$/);
 });
+
+test('TC-STRAT-02 strategy alert: from the tester, edit, plan flag', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors = trackErrors(page);
+  const sv = await api(page, 'POST', '/api/strategies', { name: 'e2e alert strat', spec: { strategy: STRATEGY, symbols: { mode: 'current', list: [] }, size: 1000, days: 30 } });
+  expect(sv.status).toBe(200);
+  await page.click('[data-testid=bp-tester]');
+  await page.click('[data-testid=st-menu]');
+  await page.locator('[data-testid=st-open]', { hasText: 'e2e alert strat' }).click();
+  await page.click('[data-testid=st-alert]');
+  await expect(page.locator('.modal [data-testid=sym-chip]')).toHaveCount(1);   // the tester's symbols (current symbol)
+  await page.click('[data-testid=sta-exit]');                                    // entries only
+  await page.click('[data-testid=sta-create]');
+  const item = page.locator('.al-item').first();
+  await page.click('.rp-tab[data-tab=alerts]');
+  await expect(item).toContainText('Strategy');
+  await expect(item).toContainText(/Strategy "e2e alert strat": entries on \w+ \(1h\)/);
+  let al = (await api(page, 'GET', '/api/alerts')).body.alerts[0];
+  expect(al).toMatchObject({ kind: 'strategy', cond: 'order', tf: '1h', active: 1 });
+  expect(al.spec).toMatchObject({ strategy_id: sv.body.strategy.id, events: ['entry'], state: {} });
+  // edit: add a symbol and exits
+  await item.locator('[data-testid=al-edit]').click();
+  await page.click('[data-testid=sta-exit]');
+  await page.click('[data-testid=sta-sym-add]');
+  await page.fill('[data-testid=symbol-search]', 'DOGEUSDT');
+  await page.click('.search-item[data-symbol="BINANCE:DOGEUSDT"]');
+  await page.click('[data-testid=search-done]');
+  await page.click('[data-testid=sta-create]');
+  await expect(item).toContainText(/entries \+ exits on 2 symbols/);
+  al = (await api(page, 'GET', '/api/alerts')).body.alerts[0];
+  expect(al.symbol).toBe('BINANCE:*');
+  expect(al.spec.symbols).toContain('BINANCE:DOGEUSDT');
+  // free plan: no strategy alerts
+  await login(page, user('free'));
+  await cleanup(page);
+  const fs = await api(page, 'POST', '/api/strategies', { name: 'f', spec: { strategy: STRATEGY, symbols: { mode: 'current', list: [] }, size: 1000, days: 30 } });
+  const r = await api(page, 'POST', '/api/alerts', { kind: 'strategy', spec: { strategy_id: fs.body.strategy.id, symbols: ['BTCUSDT'], events: ['entry'] }, channels: ['app'] });
+  expect(r.status).toBe(402);
+  await cleanup(page);
+  expect(errors.filter(e => !/status of 402/.test(e))).toEqual([]);   // the 402 above is expected
+});

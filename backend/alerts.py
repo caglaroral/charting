@@ -8,6 +8,11 @@ Alert kinds
              Indicators are computed by the same JS as the browser (jsrunner -> Node worker).
   screener   spec = {"screen_id", "name"}, cond "entered": fires on each closed bar of the screen's timeframe
              when symbols newly match the saved screen (backtester service); symbol = "<source>:*"
+  strategy   spec = {"strategy_id", "name", "symbols", "events": ["entry", "exit"], "sig", "started", "state"},
+             cond "order": the saved strategy is run forward on the symbols like a paper-trading strategy (closed
+             bars, backtest rules); fires on simulated entries and / or exits (TP / SL). state = per symbol
+             {resume, last, open}; a change of the strategy (sig) or the symbols starts it again from now.
+             symbol = the symbol, or "<source>:*" for several
 
 Conditions: crossing, crossing_up, crossing_down, greater, less, entering, exiting (two-level targets),
             closed_above, closed_below (the close of a closed bar; the forming bar is skipped),
@@ -34,7 +39,7 @@ POLL_SECONDS = 20
 WARMUP_BARS = 600
 
 CONDS = {"crossing", "crossing_up", "crossing_down", "greater", "less", "closed_above", "closed_below",
-         "entering", "exiting", "signal", "entered"}
+         "entering", "exiting", "signal", "entered", "order"}
 CLOSED_CONDS = {"closed_above", "closed_below"}  # only bars that have closed
 LINE_TOOLS = {"trend", "ray", "extended", "hline", "hray"}
 ZONE_TOOLS = {"rect", "channel"}
@@ -152,14 +157,34 @@ def save_alert(user, a: dict) -> dict:
         symbol = f"{screen['spec']['source']}:*"
         a = {**a, "tf": screen["spec"]["tf"]}
         spec = {"screen_id": screen["id"], "name": screen["name"]}
+    elif kind == "strategy":
+        stg = screener.get_strategy(uid, str(spec.get("strategy_id", "")))
+        if not stg:
+            raise ValueError("Saved strategy not found")
+        raw = [str(x).strip() for x in (spec.get("symbols") or []) if str(x).strip()]
+        src = screener._source(raw[0].rpartition(":")[0] if raw and ":" in raw[0] else None)
+        syms = list(dict.fromkeys(f"{src.prefix}:{x.rpartition(':')[2].upper()}" for x in raw))
+        if not syms:
+            raise ValueError("Choose at least one symbol")
+        lim_syms = plans.limits_of(user).get("paper_symbols")
+        if lim_syms is not None and len(syms) > lim_syms:
+            raise plans.PlanLimit(f"Your {plans.plan_of(user)['name']} plan allows {lim_syms} symbols per strategy.")
+        events = [e for e in ("entry", "exit") if e in (spec.get("events") or ["entry", "exit"])]
+        if not events:
+            raise ValueError("Choose entries, exits or both")
+        cond = "order"
+        symbol = syms[0] if len(syms) == 1 else f"{src.prefix}:*"
+        a = {**a, "tf": stg["spec"]["strategy"]["tf"]}
+        spec = {"strategy_id": stg["id"], "name": stg["name"], "symbols": syms, "events": events,
+                "sig": _strategy_sig(stg["spec"]["strategy"]), "started": int(time.time()), "state": {}}
     elif not market.known_symbol(symbol):
         raise ValueError("Unknown symbol")
-    if kind not in ("price", "drawing", "indicator", "screener") or cond not in CONDS:
+    if kind not in ("price", "drawing", "indicator", "screener", "strategy") or cond not in CONDS:
         raise ValueError("Invalid alert")
     tf = a.get("tf") or "1m"  # every kind is evaluated on the timeframe chosen in the dialog
     if tf not in market.TIMEFRAMES:
         raise ValueError("Invalid timeframe")
-    if kind == "screener":
+    if kind in ("screener", "strategy"):
         pass
     elif kind == "price":
         spec = {"price": float(spec["price"])}
@@ -182,6 +207,8 @@ def save_alert(user, a: dict) -> dict:
     lim = plans.limits_of(user)
     if kind == "screener":
         plans.check_flag(user, "screener_alerts", "Screener alerts")
+    if kind == "strategy":
+        plans.check_flag(user, "strategy_alerts", "Strategy alerts")
     if kind == "indicator":
         plans.check_flag(user, "indicator_alerts", "Indicator alerts")
         if spec.get("type") == "custom":
@@ -195,6 +222,10 @@ def save_alert(user, a: dict) -> dict:
         raise plans.PlanLimit(f"Channel(s) {', '.join(bad)} are not available on the {plans.plan_of(user)['name']} plan.")
     # (Re)arming starts evaluation from the current bar so history never fires.
     rearm = not existing or (active and not existing["active"]) or existing["tf"] != tf
+    if kind == "strategy" and existing and not rearm:
+        old = existing["spec"]
+        if old.get("sig") == spec["sig"] and old.get("symbols") == spec["symbols"]:   # same run: keep positions
+            spec = {**spec, "started": old.get("started", spec["started"]), "state": old.get("state") or {}}
     row = {
         "user_id": uid,
         "id": existing["id"] if existing else uuid.uuid4().hex,
@@ -204,7 +235,7 @@ def save_alert(user, a: dict) -> dict:
         "message": str(a.get("message") or "")[:500],
         "channels": json.dumps(sorted({"app", *[c for c in (a.get("channels") or []) if c in notify.CHANNELS]})),
         "active": active,
-        "last_bar": (_last_closed_bar(tf) if kind == "screener" else _latest_bar_time(symbol, tf)) if rearm else existing["last_bar"],
+        "last_bar": (_last_closed_bar(tf) if kind in ("screener", "strategy") else _latest_bar_time(symbol, tf)) if rearm else existing["last_bar"],
         "last_fired": 0 if rearm else existing["last_fired"],
         "fired_count": existing["fired_count"] if existing else 0,
         "updated_at": store._ts(store._now_ms()),
@@ -462,6 +493,9 @@ def _default_message(alert):
     c = COND_TEXT.get(alert["cond"], alert["cond"])
     if alert["kind"] == "screener":
         return f"Screen {spec.get('name', '')} ({alert['tf']}): new matches"
+    if alert["kind"] == "strategy":
+        what = " and ".join({"entry": "entries", "exit": "exits"}[e] for e in spec.get("events", []))
+        return f"Strategy {spec.get('name', '')} ({alert['tf']}): {what} on {len(spec.get('symbols', []))} symbols"
     if alert["kind"] == "price":
         return f"{alert['symbol']} {alert['tf']} price {c} {spec['price']}"
     if alert["kind"] == "drawing":
@@ -543,9 +577,10 @@ def run_once() -> int:
         return 0
     alerts_ = _due_alerts([dict(_row_out(r), user_id=r["user_id"]) for r in rows])
     fired_total = _run_screener_alerts([a for a in alerts_ if a["kind"] == "screener"])
+    fired_total += _run_strategy_alerts([a for a in alerts_ if a["kind"] == "strategy"])
     groups: dict[tuple, list] = {}
     for a in alerts_:
-        if a["kind"] != "screener":
+        if a["kind"] not in ("screener", "strategy"):
             groups.setdefault((a["symbol"], a["tf"]), []).append(a)
 
     for (symbol, tf), group in groups.items():
@@ -714,6 +749,95 @@ def _run_screener_alerts(lst: list[dict]) -> int:
         fired = [(t, new[0]["close"])] if new else []
         total += _finish(a, fired, t, False, msg, new[0]["symbol"] if new else a["symbol"],
                          {"title": f"Screen {sc['name']}", "symbols": [r["symbol"] for r in new]})
+    return total
+
+
+def _strategy_sig(strategy: dict) -> str:
+    return json.dumps(strategy, sort_keys=True, separators=(",", ":"))
+
+
+def _px(x) -> str:
+    return "—" if x is None else f"{x:.6g}"
+
+
+STRATEGY_EVERY = 30          # seconds between two runs of one strategy alert (a step is cheap without a new bar)
+_strategy_eval: dict = {}
+
+
+def _run_strategy_alerts(lst: list[dict]) -> int:
+    """Strategy alerts: the saved strategy stepped forward on the alert's symbols (backtester /paper, like paper
+    trading); fires on simulated entries and / or exits on closed bars."""
+    total, now = 0, time.time()
+    for a in lst:
+        if now - _strategy_eval.get(a["id"], 0) < STRATEGY_EVERY - 1:
+            continue
+        _strategy_eval[a["id"]] = now
+        sp = a["spec"]
+        stg = screener.get_strategy(a["user_id"], sp.get("strategy_id", ""))
+        if not stg:
+            total += _finish(a, [], a["last_bar"], True, a["message"] or _default_message(a), a["symbol"],
+                             {"reason": "the saved strategy was deleted"})
+            continue
+        strategy = stg["spec"]["strategy"]
+        sig = _strategy_sig(strategy)
+        if sig != sp.get("sig") or a["tf"] != strategy["tf"]:   # the strategy was edited: start again from now
+            sp = {**sp, "sig": sig, "started": int(now), "state": {}}
+            a = {**a, "tf": strategy["tf"]}
+        sp = {**sp, "name": stg["name"]}
+        try:
+            src = screener._source(sp["symbols"][0].rpartition(":")[0])
+            state = sp.get("state") or {}
+            res = screener.bt("/paper", {"source": screener.source_cfg(src), "strategy": strategy,
+                                         "symbols": [x.rpartition(":")[2] for x in sp["symbols"]],
+                                         "state": {k: [v.get("resume"), v.get("last")] for k, v in state.items() if v.get("resume")},
+                                         "start": sp["started"], "size": stg["spec"].get("size") or 1000}, timeout=120)["symbols"]
+        except Exception as e:
+            print(f"strategy alert {a['id']}: {e}", file=sys.stderr)
+            continue
+        events, new_state, changed, last = [], {}, False, a["last_bar"]
+        want = set(sp.get("events") or [])
+        side = lambda x: "Long" if x > 0 else "Short"
+        for name, r in res.items():
+            old = state.get(name, {})
+            st = r.get("status")
+            if st not in ("ok", "gap"):   # skip (no new bar), waiting for the first bar, no data: nothing to store
+                new_state[name] = old
+                continue
+            changed = True
+            last = max(last, int(r.get("last_ts") or 0))
+            if st == "ok":
+                prev = old.get("open") or {}
+                for t in r["trades"]:
+                    if "entry" in want and t["entry_ts"] != prev.get("entry_ts"):
+                        events.append((t["entry_ts"], t["entry_px"], f"{side(t['side'])} entry {name} at {_px(t['entry_px'])}"
+                                       f" · stop {_px(t.get('stop'))} · TP {_px(t.get('tp'))}"))
+                    if "exit" in want:
+                        events.append((t["exit_ts"], t["exit_px"], f"{side(t['side'])} exit {name} at {_px(t['exit_px'])} "
+                                       f"({(t.get('reason') or '').upper() or 'exit'}): {t['net']:+.2f}"))
+                op = r.get("open")
+                if op and "entry" in want and op["entry_ts"] != prev.get("entry_ts"):
+                    events.append((op["entry_ts"], op["entry_px"], f"{side(op['side'])} entry {name} at {_px(op['entry_px'])}"
+                                   f" · stop {_px(op.get('stop'))} · TP {_px(op.get('tp'))}"))
+                new_state[name] = {"resume": r["resume"], "last": r["last_ts"],
+                                   "open": {"side": op["side"], "entry_ts": op["entry_ts"]} if op else None}
+            elif st == "gap" and not old.get("open"):
+                new_state[name] = {**old, "resume": r["last_ts"], "last": r["last_ts"]}
+            else:
+                new_state[name] = old
+        if not changed and sp == a["spec"]:
+            continue
+        events.sort(key=lambda e: e[0])
+        a = {**a, "spec": {**sp, "state": new_state}}
+        head = f"Strategy {sp['name']} ({a['tf']})"
+        lines = [e[2] for e in events]
+        msg = (a["message"] + "\n" if a["message"] else "") + head + ": " + (
+            "\n".join(lines[:20]) + (f"\n… and {len(lines) - 20} more" if len(lines) > 20 else ""))
+        fired = [(events[-1][0], events[-1][1])] if events else []
+        sym = a["symbol"]
+        if events and len(sp["symbols"]) > 1:
+            first = events[-1][2].split(" ")[2]
+            sym = next((x for x in sp["symbols"] if x.rpartition(":")[2] == first), sym)
+        total += _finish(a, fired, last, False, msg, sym, {"title": head, "events": lines})
     return total
 
 

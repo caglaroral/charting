@@ -385,6 +385,10 @@ function strategyLegend() {
     el('span', { class: 'lg-actions' },
       el('button', { class: 'lg-act', title: vis ? 'Hide' : 'Show', 'data-testid': 'cs-toggle', html: vis ? ICONS.eye : ICONS.eyeOff, onclick: toggle }),
       el('button', { class: 'lg-act', title: 'Strategy report (equity curve, trades)', 'data-testid': 'cs-report', html: ICONS.stats, onclick: openChartReport }),
+      el('button', { class: 'lg-act', title: 'Alert on this strategy\'s entries and exits on this symbol', 'data-testid': 'cs-alert', html: ICONS.bell, onclick: () => {
+        if (!chartStrat.id) return toast('Save the strategy in the Strategy Tester first (an alert follows a saved strategy)', 'error');
+        strategyAlertDialog({ strategy: { id: chartStrat.id, name: chartStrat.name }, symbols: [S.symbol] });
+      } }),
       el('button', { class: 'lg-act', title: 'Edit in the Strategy Tester', 'data-testid': 'cs-edit', html: ICONS.gear, onclick: async () => {
         await openPanel('tester');
         views.tester?.edit({ id: chartStrat.id, name: chartStrat.name, strategy: { ...chartStrat.strategy, tf: S.tf }, size: chartStrat.size });
@@ -641,6 +645,7 @@ export function initScreener(a) {
   app.legendExtra = strategyLegend;
   app.savedStrategies = async () => (await api.strategies()).strategies;
   app.applySavedStrategy = applySavedStrategy;
+  app.strategyAlertDialog = strategyAlertDialog;
   initScreenTab();
   // the strategy on the chart follows the chart: new symbol / timeframe / history, and new bars
   let rt = null;
@@ -1082,6 +1087,51 @@ function symbolPicker(init, { modes = true, testid = 'st', onChange } = {}) {
     mode: () => ({ mode: sel ? sel.value : 'list', list: list.slice() }) };
 }
 
+// ======================================================================= strategy alerts
+/**
+ * An alert on a saved strategy: the server runs it forward on the chosen symbols (like paper trading, closed bars,
+ * backtest rules) and notifies on entries and / or exits. {strategy: {id, name}, symbols} for a new one,
+ * {alert} to edit one.
+ */
+async function strategyAlertDialog({ strategy, symbols = [], alert = null } = {}) {
+  let n = {};
+  try { n = await api.notify(); } catch { /* defaults */ }
+  const sp = alert?.spec || {};
+  const sid = alert ? sp.strategy_id : strategy.id;
+  const name = alert ? sp.name : strategy.name;
+  const allowed = S.plan?.limits?.alert_channels || Object.keys(CHANNELS);
+  const chosen = alert ? alert.channels : ['app', ...(n.default_channels || [])];
+  const chans = Object.keys(CHANNELS).map(c => el('label', { style: { display: 'inline-flex', gap: '4px', marginRight: '10px' } },
+    el('input', { type: 'checkbox', value: c, checked: c === 'app' || chosen.includes(c), disabled: c === 'app' || !allowed.includes(c) }), CHANNELS[c]));
+  const ev = (k, label) => el('label', { style: { display: 'inline-flex', gap: '4px', marginRight: '12px' } },
+    el('input', { type: 'checkbox', value: k, 'data-testid': `sta-${k}`, checked: !alert || (sp.events || []).includes(k) }), label);
+  const events = [ev('entry', 'Entries (long / short, with stop and TP)'), ev('exit', 'Exits (TP / SL, with the net)')];
+  const syms = symbolPicker({ mode: 'list', list: alert ? sp.symbols : symbols }, { modes: false, testid: 'sta' });
+  const freq = el('select', { 'data-testid': 'sta-freq' }, el('option', { value: 'once_per_bar', selected: !alert || alert.frequency === 'once_per_bar' }, 'Every bar with orders'),
+    el('option', { value: 'once', selected: alert?.frequency === 'once' }, 'Only once'));
+  const msg = el('input', { placeholder: 'Optional message', style: { width: '100%' }, value: alert?.message || '' });
+  const m = modal({ title: `${alert ? 'Edit alert' : 'Alert'}: strategy ${name}`, width: '640px',
+    body: el('div', { class: 'st-form' },
+      el('div', { class: 'help' }, 'The server runs the saved strategy forward on new closed bars of its timeframe, with the backtest rules (one position per symbol, fill at the next open, stop and take profit), also when the browser is closed, and notifies on its orders. Later saves of the strategy apply (it starts again from then).'),
+      el('div', { class: 'st-row' }, el('label', {}, 'Notify on'), el('div', {}, events)),
+      el('div', { class: 'st-row' }, el('label', {}, 'Symbols')), syms.el,
+      el('div', { class: 'st-row' }, el('label', {}, 'Trigger'), freq),
+      el('div', { class: 'st-row' }, el('label', {}, 'Channels'), el('div', {}, chans)),
+      el('div', { class: 'st-row' }, el('label', {}, 'Message'), msg)),
+    footer: [el('button', { class: 'btn ghost', onclick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn primary', 'data-testid': 'sta-create', onclick: async () => {
+        try {
+          await api.saveAlert({ ...(alert || {}), kind: 'strategy', spec: { strategy_id: sid, symbols: syms.get(),
+            events: events.map(l => l.querySelector('input')).filter(i => i.checked).map(i => i.value) },
+          frequency: freq.value, message: msg.value, active: alert ? alert.active : 1,
+          channels: chans.map(l => l.querySelector('input')).filter(i => i.checked).map(i => i.value) });
+          m.close();
+          toast(alert ? 'Strategy alert saved' : 'Strategy alert created (see the Alerts tab)', 'ok');
+          app.loadAlerts?.();
+        } catch (e) { toast(e.message, 'error'); }
+      } }, alert ? 'Save' : 'Create')] });
+}
+
 // ======================================================================= strategy tester tab
 const DEFAULT_STRATEGY = () => ({ tf: '1h', long: { entry: [], stop: { k: 'pct', v: 0.02 }, tp: { k: 'pct', v: 0.04 } }, short: null });
 
@@ -1119,7 +1169,14 @@ function testerView() {
       el('div', { class: 'st-row' }, nameBtn, el('div', { class: 'spacer' }),
         el('button', { class: 'btn small ghost', 'data-testid': 'st-to-chart', title: 'Show the strategy\'s entries, exits, stops and take profits on the chart', onclick: () => {
           addToChart({ id: st.id, name: st.name || 'Unsaved strategy', strategy: ed.get(), size: +size.value || 1000 });
-        } }, 'Add to chart')),
+        } }, 'Add to chart'),
+        el('button', { class: 'btn small ghost', 'data-testid': 'st-alert', title: 'Notify on this strategy\'s entries and exits (runs on the server)', html: ICONS.bell + ' Alert', onclick: async () => {
+          if (!st.id || dirty()) {
+            if (!(await confirmDialog('An alert follows a saved strategy. Save the strategy now?', { ok: 'Save' }))) return;
+            if (!(await save(false))) return;
+          }
+          strategyAlertDialog({ strategy: { id: st.id, name: st.name }, symbols: syms.get() });
+        } })),
       ed.el, syms.el,
       el('div', { class: 'st-row' }, el('label', {}, 'Period'), from, '–', to),
       el('div', { class: 'st-row' }, el('label', {}, 'Size'), size, el('span', { class: 'muted' }, 'per trade (quote currency)')),
