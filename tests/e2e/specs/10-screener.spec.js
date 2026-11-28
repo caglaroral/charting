@@ -7,8 +7,9 @@ const cleanup = (page) => page.evaluate(async () => {
   const j = async (u, o) => (await fetch(u, o)).json();
   for (const s of (await j('/api/screens')).screens) await fetch('/api/screens/' + s.id, { method: 'DELETE' });
   for (const p of (await j('/api/papers')).papers) await fetch('/api/papers/' + p.id, { method: 'DELETE' });
+  for (const s of (await j('/api/strategies')).strategies) await fetch('/api/strategies/' + s.id, { method: 'DELETE' });
   for (const a of (await j('/api/alerts')).alerts) await fetch('/api/alerts/' + a.id, { method: 'DELETE' });
-  localStorage.removeItem('sc.cur'); localStorage.removeItem('st.form'); localStorage.removeItem('bp.tab');
+  for (const k of ['sc.cur', 'st.form', 'st.cur', 'bp.tab', 'chart.strategy', 'rep.page']) localStorage.removeItem(k);
 });
 
 const api = (page, method, url, body) => page.evaluate(async ([m, u, b]) => {
@@ -147,10 +148,19 @@ test('TC-TEST-01 strategy tester: backtest, results, trades on the chart', async
   await page.fill('[data-testid=long-stop-v]', '2');
   await page.fill('[data-testid=long-tp-v]', '4');
   await page.click('[data-testid=st-run]');
-  await expect(page.locator('[data-testid=st-table]')).toBeVisible({ timeout: 180_000 });
-  await expect(page.locator('[data-testid=st-total]')).toContainText('Trades');
+  // report: overview with the equity curve, performance, list of trades, symbols
+  await expect(page.locator('[data-testid=st-total]')).toContainText('Trades', { timeout: 180_000 });
+  await expect(page.locator('[data-testid=st-equity] canvas').first()).toBeVisible();
+  await page.click('[data-testid=rep-performance]');
+  await expect(page.locator('[data-testid=st-perf]')).toContainText('Max consecutive losses');
+  await page.click('[data-testid=rep-symbols]');
+  await expect(page.locator('[data-testid=st-table]')).toBeVisible();
   const trades = parseInt(await page.locator('[data-testid=st-table] tbody tr td:nth-child(2)').first().textContent());
   expect(trades).toBeGreaterThan(5);
+  await page.click('[data-testid=rep-trades]');
+  await expect(page.locator('[data-testid=st-trades] tbody tr')).toHaveCount(trades);
+  await expect(page.locator('[data-testid=st-trades] tbody tr').first()).toContainText(/TP|SL/);
+  await page.click('[data-testid=rep-symbols]');
   await page.locator('[data-testid=st-table] tbody tr').first().click();
   await expect(page.locator('[data-testid=trades-table] tbody tr')).toHaveCount(trades);
   await page.waitForFunction(() => __app.S.tf === '1h');
@@ -178,7 +188,15 @@ test('TC-PAPER-01 paper trading: create, edit, pause / resume, restart, delete; 
   await page.click('.modal [data-testid=long-entry-add]');
   await page.click('[data-testid=cond-ok]');
   await page.selectOption('.modal [data-testid=st-tf]', '1m');
-  await page.fill('[data-testid=pp-symbols]', 'BTCUSDT, DOGEUSDT');
+  // symbols from the symbol search, several at once
+  await page.click('[data-testid=pp-sym-clear]');
+  await page.click('[data-testid=pp-sym-add]');
+  for (const sym of ['BTCUSDT', 'DOGEUSDT']) {
+    await page.fill('[data-testid=symbol-search]', sym);
+    await page.click(`.search-item[data-symbol="BINANCE:${sym}"]`);
+  }
+  await page.click('[data-testid=search-done]');
+  await expect(page.locator('.modal [data-testid=sym-chip]')).toHaveCount(2);
   await page.click('[data-testid=pp-save]');
   const row = page.locator('[data-testid=pp-table] tbody tr').first();
   await expect(row).toContainText('e2e paper');
@@ -239,4 +257,106 @@ test('TC-SCREEN-03 phone: screener, tester and paper trading from the menu', asy
   await page.click('[data-testid=tab-chart]');
   await expect(panel).toBeHidden();
   await ctx.close();
+});
+
+test('TC-STRAT-01 saved strategies: save / rename / save as / open / delete; strategy on the chart with its report', async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors = trackErrors(page);
+  await page.waitForFunction(() => __app.S.bars.length > 100);
+  await page.click('[data-testid=bp-tester]');
+  await page.click('[data-testid=long-entry-add]');
+  await page.fill('[data-testid=cond-b] [data-role=value]', '30');
+  await page.click('[data-testid=cond-ok]');
+  // symbols picked in the symbol search
+  await page.selectOption('[data-testid=st-symbols]', 'list');
+  await page.fill('[data-testid=symbol-search]', 'ETHUSDT');
+  await page.click('.search-item[data-symbol="BINANCE:ETHUSDT"]');
+  await page.fill('[data-testid=symbol-search]', 'XRPUSDT');
+  await page.click('.search-item[data-symbol="BINANCE:XRPUSDT"]');
+  await page.click('.search-item[data-symbol="BINANCE:XRPUSDT"]');   // a second click removes it
+  await page.click('[data-testid=search-done]');
+  await expect(page.locator('[data-testid=st-sym-chips] [data-testid=sym-chip]')).toHaveText(['ETHUSDT×']);
+  // save, rename, save as
+  await page.click('[data-testid=st-menu]');
+  await page.click('[data-testid=st-save]');
+  await page.fill('.modal input', 'e2e rsi');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi$/);
+  let list = (await api(page, 'GET', '/api/strategies')).body.strategies;
+  expect(list).toHaveLength(1);
+  expect(list[0].spec).toMatchObject({ symbols: { mode: 'list', list: ['BINANCE:ETHUSDT'] }, size: 1000 });
+  expect(list[0].spec.strategy.long.entry[0].b).toEqual({ const: 30 });
+  await page.click('[data-testid=st-menu]');
+  await page.click('[data-testid=st-rename]');
+  await page.fill('.modal input', 'e2e rsi 2');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi 2$/);
+  // a change marks it unsaved; save as makes a copy
+  await page.fill('[data-testid=long-tp-v]', '6');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi 2 \*$/);
+  await page.click('[data-testid=st-menu]');
+  await page.click('[data-testid=st-saveas]');
+  await page.fill('.modal input', 'e2e rsi tp6');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi tp6$/);
+  list = (await api(page, 'GET', '/api/strategies')).body.strategies;
+  expect(list.map(x => x.name).sort()).toEqual(['e2e rsi 2', 'e2e rsi tp6']);
+  expect(list.find(x => x.name === 'e2e rsi tp6').spec.strategy.long.tp.v).toBeCloseTo(0.06);
+  expect(list.find(x => x.name === 'e2e rsi 2').spec.strategy.long.tp.v).toBeCloseTo(0.04);
+  // open the other one
+  await page.click('[data-testid=st-menu]');
+  await page.locator('[data-testid=st-open]', { hasText: 'e2e rsi 2' }).click();
+  await expect(page.locator('[data-testid=long-tp-v]')).toHaveValue('4');
+  await expect(page.locator('[data-testid=st-menu]')).toHaveText(/e2e rsi 2$/);
+  // add it to the chart: runs on the chart's symbol and timeframe, entries / exits as markers, SL / TP lines
+  await page.click('[data-testid=st-to-chart]');
+  const legend = page.locator('[data-testid=chart-strategy]');
+  await expect(legend).toContainText('e2e rsi 2');
+  await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chart.strategy')).name)).toBe('e2e rsi 2');
+  // it follows a timeframe change
+  await page.evaluate(() => __app.setTf ? __app.setTf('4h') : null);
+  await expect(legend).toContainText(/\d+ trades/, { timeout: 120_000 });
+  // the report of the chart run
+  await legend.hover();
+  await page.click('[data-testid=cs-report]');
+  await expect(page.locator('[data-testid=st-results]')).toContainText('(chart)');
+  await expect(page.locator('[data-testid=st-total]')).toContainText('Net profit');
+  // hide, remove
+  await legend.hover();
+  await page.click('[data-testid=cs-toggle]');
+  await expect(legend).toHaveClass(/off/);
+  await legend.hover();
+  await page.click('[data-testid=cs-remove]');
+  await expect(legend).toHaveCount(0);
+  // delete
+  await page.click('[data-testid=st-menu]');
+  await page.click('[data-testid=st-delete]');
+  await page.click('[data-testid=confirm-ok]');
+  await expect.poll(async () => (await api(page, 'GET', '/api/strategies')).body.strategies.length).toBe(1);
+  // plan limit and validation
+  const bad = await api(page, 'POST', '/api/strategies', { name: 'bad', spec: { strategy: { tf: '1h', long: { entry: [] } } } });
+  expect(bad.status).toBe(400);
+  expect(errors.filter(e => !/status of 400/.test(e))).toEqual([]);
+});
+
+test('TC-SCREEN-04 right panel: the active screen\'s matches in the Screener tab', async ({ page }) => {
+  test.setTimeout(180_000);
+  const r = await api(page, 'POST', '/api/screens', { name: 'e2e tab', spec: RSI_SPEC });
+  expect(r.status).toBe(200);
+  await page.click('[data-testid=rp-screen]');
+  await expect(page.locator('[data-testid=rs-list]')).toContainText('No screen yet');
+  await page.click('[data-testid=rs-menu]');
+  await page.locator('[data-testid=rs-open]', { hasText: 'e2e tab' }).click();
+  await expect(page.locator('[data-testid=rs-status]')).toContainText(/\d+ match/, { timeout: 120_000 });
+  const rows = page.locator('[data-testid=rs-list] .rs-row');
+  expect(await rows.count()).toBeGreaterThan(0);
+  const sym = await rows.nth(0).getAttribute('data-sym');
+  await rows.nth(0).click();
+  await page.waitForFunction((s) => __app.S.symbol === s, sym);
+  await expect(rows.nth(0)).toHaveClass(/active/);
+  // the screener opens the same screen
+  await page.click('[data-testid=rs-menu]');
+  await page.click('[data-testid=rs-edit]');
+  await expect(page.locator('[data-testid=sc-menu]')).toHaveText(/e2e tab$/);
 });

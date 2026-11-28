@@ -112,6 +112,7 @@ function openMenuSheet() {
     body.append(...listItems([
       { title: 'Chart' },
       { label: 'Screener', testid: 'screener', onClick: () => app.openBottomPanel('screener') },
+      { label: 'Screen results', testid: 'screen-results', onClick: () => { closeSheet(); setPanel('screen'); } },
       { label: 'Strategy tester', testid: 'tester', onClick: () => app.openBottomPanel('tester') },
       { label: 'Paper trading', testid: 'paper', onClick: () => app.openBottomPanel('paper') },
       { label: 'Custom indicator editor', testid: 'editor', onClick: () => d.dialogs.scriptEditor(app) },

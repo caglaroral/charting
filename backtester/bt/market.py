@@ -134,8 +134,14 @@ def _fetch(src, tf, frm, to=None, symbol=None):
         parts.append(f'{sel}, toUInt32({T}) + 60 AS te FROM {src.table(src.recent)} WHERE {where} '
                      f'AND {T} >= toDateTime({{he:UInt32}})')
     B = _bucket(tf, 'ts')
+    src_sql = " UNION ALL ".join(parts)
+    if len(parts) > 1 and ntf == '1m':
+        # a 1m history table can itself include the recent rows (a view of history + recent, e.g. klines_1m_all):
+        # one row per minute, so a minute present in both is not counted twice (volume)
+        src_sql = (f'SELECT s, ts, any(o) AS o, any(h) AS h, any(l) AS l, any(c) AS c, any(v) AS v, max(te) AS te '
+                   f'FROM ({src_sql}) GROUP BY s, ts')
     sql = (f'SELECT s, toUInt32({B}) AS b, argMin(o, ts), max(h), min(l), argMax(c, ts), sum(v), max(te) '
-           f'FROM ({" UNION ALL ".join(parts)}) GROUP BY s, b ORDER BY s, b')
+           f'FROM ({src_sql}) GROUP BY s, b ORDER BY s, b')
     rows = src.query(sql, params)
     out = {}
     sec = TF_SEC[tf]

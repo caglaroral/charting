@@ -233,7 +233,7 @@ input[type=checkbox] { width: auto; accent-color: var(--accent); }
 .search-item.sel, .search-item:hover { background: var(--hover); }
 .search-item .s-sym { font-weight: 600; min-width: 140px; }
 .search-item .s-src { margin-left: auto; color: var(--muted); font-size: 11px; }
-.search-item .s-check { color: var(--accent); }
+.search-item .s-check { color: var(--accent); display: inline-block; width: 14px; flex-shrink: 0; }
 
 /* Indicator picker */
 .ind-list { max-height: 60vh; overflow: auto; }
@@ -479,3 +479,21 @@ body.mobile .bpanel { position: fixed; left: 0; right: 0; top: var(--m-top); bot
 body.mobile .bp-resize, body.mobile #bp-max { display: none; }
 body.mobile .bp-split { display: block; overflow: auto; }
 body.mobile .bp-split > div { overflow: visible; }
+/* strategy report, symbol picker, screen tab, strategy on the chart */
+.card small { display: block; }
+.rep { display: flex; flex-direction: column; min-height: 100%; }
+.rep-tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
+.rep-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 6px 10px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.rep-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.rep-body { flex: 1; min-height: 0; }
+.eq-chart { height: 260px; margin: 0 8px 8px; position: relative; }
+.sc-table.perf td:first-child { color: var(--muted); }
+.pill.tp { background: rgba(8,153,129,.2); color: var(--up); }
+.pill.sl { background: rgba(242,54,69,.18); color: var(--down); }
+.sym-list { display: flex; flex-direction: column; gap: 4px; }
+.sym-chips { max-height: 96px; overflow: auto; }
+.rs-cols, .rs-row { grid-template-columns: minmax(0, 1.4fr) 1fr .9fr; }
+.rs-status { color: var(--muted); font-size: 11px; padding: 6px 10px; border-top: 1px solid var(--border); flex-shrink: 0; }
+#tab-screen .wl-list { flex: 1; overflow: auto; }
+.lg-strat .lg-name { color: #2962ff; font-weight: 600; }
+.lg-strat .err { color: var(--down); }

@@ -76,7 +76,7 @@ server evaluates indicators with **exactly** the JavaScript the browser runs.
 | `jsrunner.py` / `jsworker.js` / `jsgate.js` | sandboxed Node worker for indicator calculations; in Docker a separate `jsworker` container without network, reached over a Unix socket |
 | `notify.py` | Telegram, SMTP, webhook delivery |
 | `plans.py` | subscription plans and limit checks |
-| `screener.py` | saved screens, screen runs (+ exchange 24h stats), backtests; client of the backtester |
+| `screener.py` | saved screens and strategies, screen runs (+ exchange 24h stats), backtests; client of the backtester |
 | `paper.py` | paper-trading strategies and their engine thread (one backtester step per strategy every 30 s) |
 
 The **backtester** (`backtester/`, own container) runs the backtest engine: `bt/market.py` reads bars
@@ -102,8 +102,9 @@ deletes are soft (`deleted = 1`).
 | `datasources` | id | ClickHouse connection, database, table per timeframe, column mapping, live provider |
 | `plans` | id | limits JSON |
 | `screens` | user_id, id | saved screens: name, spec JSON (source, timeframe, conditions, columns, universe, sort) |
+| `strategies` | user_id, id | saved strategies of the tester: name, spec JSON (strategy, symbols, size, period length) |
 | `papers` | user_id, id | paper-trading strategies: strategy, symbols, size, channels, run, state per symbol |
-| `paper_trades` | user_id, paper_id, run, symbol, entry_time | closed paper trades |
+| `paper_trades` | user_id, paper_id, run, symbol, entry_time | closed paper trades (with exit reason and stop / take-profit levels) |
 
 ## API (selection)
 
@@ -121,6 +122,7 @@ deletes are soft (`deleted = 1`).
 | `GET/PUT /api/notify`, `POST /api/notify/test` | user notification settings |
 | `GET /api/screener/meta`, `POST /api/screener/run` | indicators / timeframes; run a screen spec |
 | `GET/POST /api/screens`, `DELETE /api/screens/{id}` | saved screens |
+| `GET/POST /api/strategies`, `DELETE /api/strategies/{id}` | saved strategies |
 | `POST /api/backtest` | strategy tester |
 | `GET/POST /api/papers`, `DELETE /api/papers/{id}`, `POST /api/papers/{id}/reset`, `GET /api/papers/{id}/trades?run` | paper trading |
 | `/api/admin/{datasources,users,plans,notify,ratelimit}` | admin |

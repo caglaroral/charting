@@ -207,6 +207,19 @@ CREATE TABLE IF NOT EXISTS charting.screens
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (user_id, id);
 
+-- Saved strategies of the strategy tester. spec = {strategy, symbols: {mode, list}, size, days} (backend/screener.py)
+CREATE TABLE IF NOT EXISTS charting.strategies
+(
+    user_id String,
+    id String,
+    name String,
+    spec String,
+    deleted UInt8 DEFAULT 0,
+    updated_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (user_id, id);
+
 -- Paper-trading strategies. strategy = engine strategy (app timeframes), universe = symbols to trade,
 -- state = {symbol: {resume, open, last_close, status}} written by the paper engine. A change of the strategy or
 -- the symbols starts a new run (run + 1, started_at = now); trades of earlier runs are kept.
@@ -248,3 +261,8 @@ CREATE TABLE IF NOT EXISTS charting.paper_trades
 )
 ENGINE = ReplacingMergeTree(created_at)
 ORDER BY (user_id, paper_id, run, symbol, entry_time);
+
+-- exit reason ('sl' / 'tp') and the levels set at the fill (added later)
+ALTER TABLE charting.paper_trades ADD COLUMN IF NOT EXISTS reason LowCardinality(String) DEFAULT '';
+ALTER TABLE charting.paper_trades ADD COLUMN IF NOT EXISTS stop Nullable(Float64);
+ALTER TABLE charting.paper_trades ADD COLUMN IF NOT EXISTS tp Nullable(Float64)

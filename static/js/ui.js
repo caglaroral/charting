@@ -163,3 +163,4 @@ ICONS.expand = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M7 9l5-
 ICONS.restore = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';
 
 export const ic = (name) => el('span', { html: ICONS[name], style: { display: 'inline-flex' } });
+ICONS.stats = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 20h18M5 16l4-5 4 3 6-8" stroke="currentColor" stroke-width="1.7" fill="none"/></svg>';

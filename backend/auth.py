@@ -147,7 +147,7 @@ def set_password(user_id: str, password: str) -> None:
 
 
 USER_TABLES = ("sessions", "watchlists", "drawings", "settings", "alerts", "alert_events", "alert_log", "scripts",
-               "screens", "papers", "paper_trades")
+               "screens", "strategies", "papers", "paper_trades")
 
 
 def purge_user(user_id: str) -> None:

@@ -6,6 +6,7 @@
 //   strategy {tf, long: {entry: [cond], stop, tp} | null, short: ...}, exit = {k: 'pct', v} | {k: 'atr', m, p} | null
 import { api } from './api.js';
 import { el, $, toast, showMenu, modal, confirmDialog, promptDialog, ICONS } from './ui.js';
+import * as dialogs from './dialogs.js';
 
 let app, S;
 let meta = null;
@@ -24,6 +25,7 @@ const PARAMS = {
 const OPS = { '<': 'less than', '>': 'greater than', xup: 'crosses up', xdn: 'crosses down' };
 const OP_SHORT = { '<': '<', '>': '>', xup: '↗ crosses', xdn: '↘ crosses' };
 const PRICES = { open: 'Open', high: 'High', low: 'Low', close: 'Close', volume: 'Volume' };
+const TF_SECONDS = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '12h': 43200, '1D': 86400, '1W': 604800 };
 const CHANNELS = { app: 'In-app', telegram: 'Telegram', email: 'E-mail', webhook: 'Webhook' };
 
 const ls = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -56,7 +58,7 @@ function fmtVal(v) {
 }
 const fmtMoney = (v) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}`);
 const fmtPct = (v) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
-const cls = (v) => (v == null ? '' : v >= 0 ? 'up' : 'down');
+const cls = (v) => (v == null || v === 0 ? '' : v > 0 ? 'up' : 'down');
 const utcDate = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);
 const fmtDT = (sec) => app.fmtTime ? app.fmtTime(sec + S.tzOffset) : new Date(sec * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
@@ -179,7 +181,7 @@ function exitEditor(e, label, testid) {
   return { el: box, get: () => cur };
 }
 
-function strategyEditor(st, { screens = [] } = {}) {
+function strategyEditor(st, { screens = [], onChange } = {}) {
   const s = JSON.parse(JSON.stringify(st || { tf: '1h', long: { entry: [], stop: { k: 'pct', v: 0.02 }, tp: { k: 'pct', v: 0.04 } }, short: null }));
   const box = el('div', { class: 'st-form' });
   const tf = el('select', { 'data-testid': 'st-tf' }, meta.timeframes.map(t => el('option', { value: t, selected: t === s.tf }, t)));
@@ -187,7 +189,7 @@ function strategyEditor(st, { screens = [] } = {}) {
   const sideBox = (side) => {
     const on = !!s[side];
     const sd = s[side] || { entry: [], stop: { k: 'pct', v: 0.02 }, tp: { k: 'pct', v: 0.04 } };
-    const chips = condChips(sd.entry, () => {}, { addLabel: '+ Entry condition', testid: `${side}-entry` });
+    const chips = condChips(sd.entry, () => onChange?.(), { addLabel: '+ Entry condition', testid: `${side}-entry` });
     const stop = exitEditor(sd.stop, 'Stop', `${side}-stop`), tp = exitEditor(sd.tp, 'Take profit', `${side}-tp`);
     const cb = el('input', { type: 'checkbox', checked: on, 'data-testid': `st-${side}`, onchange: (e) => wrap.classList.toggle('off', !e.target.checked) });
     const wrap = el('div', { class: `st-side ${on ? '' : 'off'}` }, el('label', { class: 'st-side-head' }, cb, side === 'long' ? 'Long' : 'Short'),
@@ -204,6 +206,7 @@ function strategyEditor(st, { screens = [] } = {}) {
     L.sd.entry.splice(0, L.sd.entry.length, ...JSON.parse(JSON.stringify(sc.spec.conds)));
     L.cb.checked = true; L.cb.dispatchEvent(new Event('change'));
     L.chips.render();
+    onChange?.();
   } }, el('option', { value: '' }, 'Load entry from a saved screen…'), screens.map(sc => el('option', { value: sc.id }, sc.name))) : null;
   box.append(el('div', { class: 'st-row' }, el('label', {}, 'Timeframe'), tf, fromScreen), sideBox('long'), sideBox('short'));
   return { el: box, get: () => {
@@ -225,32 +228,85 @@ function strategySummary(st) {
   return parts.join(' | ');
 }
 
-// ======================================================================= trade markers on the chart
+// ======================================================================= trades on the chart
+// Two sources: trades picked in the tester / paper trading (`shown`, until the symbol changes) and the strategy
+// added to the chart (`chartStrat`, re-run on the chart's symbol and timeframe like a TradingView strategy).
+// Entries are arrows, exits circles labelled TP / SL with the net, the stop and take-profit levels of each trade
+// dashed lines from its entry to its exit.
 let shown = null;      // {symbol, tf, trades, open}
 let markerApi = null, markerSeries = null;
+let levelSeries = [];
+let chartStrat = ls.get('chart.strategy', null);   // {id, name, strategy, size, visible}
+let chartRun = null;   // {key, symbol, tf, strategy, r, trades, open, total, error, busy}
+
+function layer() {
+  if (shown && shown.symbol === S.symbol && shown.tf === S.tf) return shown;
+  if (chartStrat && chartStrat.visible !== false && chartRun && !chartRun.error && chartRun.symbol === S.symbol && chartRun.tf === S.tf) return chartRun;
+  return null;
+}
+const exitTag = (t) => (t.reason === 'sl' ? 'SL' : t.reason === 'tp' ? 'TP' : 'Exit');
+
 function applyMarkers() {
   if (!app.mainSeries) return;
-  const want = shown && shown.symbol === S.symbol && shown.tf === S.tf;
+  const L = layer();
   const off = S.tzOffset || 0;
   const list = [];
-  if (want) {
-    for (const t of shown.trades) {
+  if (L) {
+    for (const t of L.trades) {
       const long = t.side > 0;
       list.push({ time: t.entry_ts + off, position: long ? 'belowBar' : 'aboveBar', color: long ? '#089981' : '#f23645', shape: long ? 'arrowUp' : 'arrowDown', text: long ? 'Long' : 'Short' });
-      if (t.exit_ts != null) list.push({ time: t.exit_ts + off, position: long ? 'aboveBar' : 'belowBar', color: t.net >= 0 ? '#26a69a' : '#ef5350', shape: 'circle', text: fmtMoney(t.net) });
+      if (t.exit_ts != null) {
+        const below = (t.reason === 'sl') === long;   // a long's stop and a short's take-profit sit below the price
+        list.push({ time: t.exit_ts + off, position: below ? 'belowBar' : 'aboveBar', color: t.net >= 0 ? '#26a69a' : '#ef5350', shape: 'circle', text: `${exitTag(t)} ${fmtMoney(t.net)}` });
+      }
     }
-    if (shown.open) {
-      const long = shown.open.side > 0;
-      list.push({ time: shown.open.entry_ts + off, position: long ? 'belowBar' : 'aboveBar', color: '#2962ff', shape: long ? 'arrowUp' : 'arrowDown', text: `${long ? 'Long' : 'Short'} (open)` });
+    if (L.open) {
+      const long = L.open.side > 0;
+      list.push({ time: L.open.entry_ts + off, position: long ? 'belowBar' : 'aboveBar', color: '#2962ff', shape: long ? 'arrowUp' : 'arrowDown', text: `${long ? 'Long' : 'Short'} (open)` });
     }
     list.sort((a, b) => a.time - b.time);
   }
   if (markerSeries !== app.mainSeries) { markerApi = null; markerSeries = app.mainSeries; }
   if (!markerApi) {
-    if (!list.length) return;
-    markerApi = LightweightCharts.createSeriesMarkers(app.mainSeries, list);
+    if (list.length) markerApi = LightweightCharts.createSeriesMarkers(app.mainSeries, list);
   } else markerApi.setMarkers(list);
+  drawLevels(L);
 }
+
+function drawLevels(L) {
+  for (const s of levelSeries) { try { app.chart.removeSeries(s); } catch { /* chart rebuilt */ } }
+  levelSeries = [];
+  if (!L || !app.chart) return;
+  const off = S.tzOffset || 0;
+  const items = [...L.trades, ...(L.open ? [{ ...L.open, exit_ts: null }] : [])].filter(t => t.stop != null || t.tp != null)
+    .sort((a, b) => a.entry_ts - b.entry_ts);
+  if (!items.length) return;
+  const lastT = S.view.length ? S.view[S.view.length - 1].time : null;
+  // one series per level: a segment takes the color of its first point (LWC 5; whitespace does not break a
+  // line), so each trade's line starts at its entry in color and the segment from its exit to the next trade is
+  // transparent
+  const data = { stop: [], tp: [] };
+  const COLORS = { stop: '#f23645', tp: '#089981' };
+  for (const t of items) {
+    const a = t.entry_ts + off, b = t.exit_ts != null ? t.exit_ts + off : lastT;
+    if (b == null || b < a) continue;
+    for (const k of ['stop', 'tp']) {
+      const arr = data[k];
+      if (t[k] == null || (arr.length && arr[arr.length - 1].time >= a)) continue;
+      if (b > a) arr.push({ time: a, value: t[k], color: COLORS[k] });
+      arr.push({ time: b, value: t[k], color: 'transparent' });
+    }
+  }
+  const pane = app.mainPaneIndex?.() || 0;
+  for (const k of ['stop', 'tp']) {
+    if (!data[k].length) continue;
+    const s = app.chart.addSeries(LightweightCharts.LineSeries, { color: COLORS[k], lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+      crosshairMarkerVisible: false, pointMarkersVisible: false, autoscaleInfoProvider: () => null, title: '' }, pane);
+    s.setData(data[k]);
+    levelSeries.push(s);
+  }
+}
+
 async function showTrades(symbol, tf, trades, open = null) {
   shown = { symbol, tf, trades, open };
   if (S.symbol !== symbol || S.tf !== tf) await app.setSymbol(symbol, { tf });
@@ -258,10 +314,84 @@ async function showTrades(symbol, tf, trades, open = null) {
 }
 function clearTrades() { shown = null; applyMarkers(); }
 async function focusTrade(t) {
-  if (!shown) return;
   const off = S.tzOffset || 0;
   const err = await app.goTo(t.entry_ts + off, t.exit_ts != null ? t.exit_ts + off : null);
   if (err) toast(err, 'error');
+}
+
+async function ensureMeta() {
+  if (!meta) meta = await api.screenerMeta();
+  return meta;
+}
+
+// ---- the strategy on the chart
+function addToChart(s) {
+  chartStrat = { id: s.id || null, name: s.name || 'Strategy', strategy: JSON.parse(JSON.stringify(s.strategy)), size: s.size || 1000, visible: true };
+  ls.set('chart.strategy', chartStrat);
+  shown = null;
+  runChartStrategy(true);
+  toast(`"${chartStrat.name}" added to the chart (runs on the chart's symbol and timeframe)`, 'ok');
+}
+function removeFromChart() {
+  chartStrat = null; chartRun = null;
+  ls.set('chart.strategy', null);
+  applyMarkers(); app.renderLegend?.();
+}
+
+async function runChartStrategy(force = false) {
+  if (!chartStrat || !S.bars?.length) return;
+  const tf = S.tf, symbol = S.symbol;
+  const key = `${symbol}|${tf}|${S.bars[0].time}|${S.bars[S.bars.length - 1].time}|${JSON.stringify(chartStrat.strategy)}|${chartStrat.size}`;
+  if (!force && chartRun && chartRun.key === key) return;
+  const prev = chartRun && chartRun.symbol === symbol && chartRun.tf === tf ? chartRun : null;
+  chartRun = { ...(prev || { trades: [] }), key, symbol, tf, busy: true, error: null };
+  app.renderLegend?.();
+  const strategy = { ...chartStrat.strategy, tf };
+  let next;
+  try {
+    await ensureMeta();
+    if (!meta.timeframes.includes(tf)) throw new Error(`the backtester has no ${tf} timeframe`);
+    const start = S.bars[0].time - (S.tzOffset || 0);
+    const r = await api.backtest({ source: app.symbolSource(symbol) || meta.sources[0]?.prefix, strategy, symbols: [symbol],
+      start, end: Math.floor(Date.now() / 1000), size: chartStrat.size || 1000 });
+    const s = r.symbols[0] || {};
+    next = { key, symbol, tf, strategy, r, trades: s.trades || [], open: null, total: s.metrics || null, error: s.skipped || null, start: s.start || start };
+  } catch (e) {
+    next = { key, symbol, tf, strategy, trades: [], error: e.message };
+  }
+  if (!chartRun || chartRun.key !== key) return;   // superseded by a newer run
+  chartRun = next;
+  applyMarkers();
+  app.renderLegend?.();
+}
+
+function strategyLegend() {
+  if (!chartStrat) return null;
+  const R = chartRun && chartRun.symbol === S.symbol && chartRun.tf === S.tf ? chartRun : null;
+  const m = R?.total;
+  const info = !R || R.busy ? el('span', { class: 'muted' }, 'running…')
+    : R.error ? el('span', { class: 'err', title: R.error }, '⚠ ' + R.error.slice(0, 80))
+      : el('span', {}, `${m?.trades ?? 0} trades · `, el('span', { class: cls(m?.net) }, fmtMoney(m?.net ?? 0)),
+        m?.win_pct != null ? ` · win ${m.win_pct.toFixed(1)}%` : '', m?.profit_factor != null ? ` · PF ${m.profit_factor.toFixed(2)}` : '');
+  const vis = chartStrat.visible !== false;
+  const toggle = () => { chartStrat.visible = !vis; ls.set('chart.strategy', chartStrat); applyMarkers(); app.renderLegend?.(); };
+  return el('div', { class: `lg-ind lg-strat ${vis ? '' : 'off'}`, 'data-testid': 'chart-strategy' },
+    el('span', { class: 'lg-name', title: strategySummary(chartStrat.strategy) }, `Strategy: ${chartStrat.name}`),
+    el('span', { class: 'lg-vals' }, info),
+    el('span', { class: 'lg-actions' },
+      el('button', { class: 'lg-act', title: vis ? 'Hide' : 'Show', 'data-testid': 'cs-toggle', html: vis ? ICONS.eye : ICONS.eyeOff, onclick: toggle }),
+      el('button', { class: 'lg-act', title: 'Strategy report (equity curve, trades)', 'data-testid': 'cs-report', html: ICONS.stats, onclick: openChartReport }),
+      el('button', { class: 'lg-act', title: 'Edit in the Strategy Tester', 'data-testid': 'cs-edit', html: ICONS.gear, onclick: async () => {
+        await openPanel('tester');
+        views.tester?.edit({ id: chartStrat.id, name: chartStrat.name, strategy: { ...chartStrat.strategy, tf: S.tf }, size: chartStrat.size });
+      } }),
+      el('button', { class: 'lg-act', title: 'Remove from the chart', 'data-testid': 'cs-remove', html: ICONS.trash.replace(/16/g, '14'), onclick: removeFromChart })));
+}
+
+async function openChartReport() {
+  if (!chartRun?.r) return toast(chartRun?.error || 'The strategy has not run yet', 'error');
+  await openPanel('tester');
+  views.tester?.showResult(chartRun.r, chartRun.strategy, { size: chartStrat.size || 1000, title: `${chartStrat.name} on ${app.symbolName(chartRun.symbol)} ${chartRun.tf} (chart)` });
 }
 
 function tradesTable(trades, { onPick } = {}) {
@@ -279,6 +409,205 @@ function tradesTable(trades, { onPick } = {}) {
     el('thead', {}, el('tr', {}, [...first, 'Entry', 'Price', 'Exit', 'Price', 'Net'].map(h => el('th', {}, h)))), tb);
 }
 
+// ======================================================================= strategy report
+// Overview (key numbers, equity curve and drawdown), Performance (all / long / short), the list of trades and,
+// for several symbols, a row per symbol. Used for backtests, the strategy on the chart and paper trading.
+function perfStats(trades, tfSec) {
+  const wins = trades.filter(t => t.net > 0), losses = trades.filter(t => t.net <= 0);
+  const sum = (a) => a.reduce((x, t) => x + t.net, 0);
+  const bars = (t) => t.bars ?? Math.round((t.exit_ts - t.entry_ts) / tfSec);
+  const avg = (a, f) => (a.length ? a.reduce((x, t) => x + f(t), 0) / a.length : null);
+  let cw = 0, cl = 0, mcw = 0, mcl = 0, eq = 0, peak = 0, dd = 0;
+  for (const t of trades.slice().sort((a, b) => a.exit_ts - b.exit_ts)) {
+    if (t.net > 0) { cw++; cl = 0; } else { cl++; cw = 0; }
+    mcw = Math.max(mcw, cw); mcl = Math.max(mcl, cl);
+    eq += t.net; peak = Math.max(peak, eq); dd = Math.min(dd, eq - peak);
+  }
+  const gp = sum(wins), gl = -sum(losses);
+  const aw = avg(wins, t => t.net), al = avg(losses, t => t.net);
+  return {
+    net: sum(trades), gross_profit: gp, gross_loss: -gl, pf: gl > 0 ? gp / gl : null, trades: trades.length,
+    wins: wins.length, losses: losses.length, win_pct: trades.length ? wins.length / trades.length * 100 : null,
+    avg: avg(trades, t => t.net), avg_win: aw, avg_loss: al, ratio: aw != null && al ? aw / -al : null,
+    best: wins.length ? Math.max(...wins.map(t => t.net)) : null, worst: losses.length ? Math.min(...losses.map(t => t.net)) : null,
+    mcw, mcl, bars: avg(trades, bars), bars_win: avg(wins, bars), bars_loss: avg(losses, bars), max_dd: trades.length ? dd : null,
+    sl: trades.filter(t => t.reason === 'sl').length, tp: trades.filter(t => t.reason === 'tp').length,
+    run_up: avg(trades.filter(t => t.run_up != null), t => t.run_up), draw: avg(trades.filter(t => t.draw != null), t => -t.draw),
+  };
+}
+
+const PERF_ROWS = [
+  ['net', 'Net profit', 'm'], ['gross_profit', 'Gross profit', 'm'], ['gross_loss', 'Gross loss', 'm'], ['pf', 'Profit factor', 'r'],
+  ['max_dd', 'Max drawdown (closed trades)', 'm'], ['trades', 'Total trades', 'n'], ['wins', 'Winning trades', 'n'], ['losses', 'Losing trades', 'n'],
+  ['win_pct', 'Percent profitable', 'p'], ['avg', 'Avg trade', 'm'], ['avg_win', 'Avg winning trade', 'm'], ['avg_loss', 'Avg losing trade', 'm'],
+  ['ratio', 'Ratio avg win / avg loss', 'r'], ['best', 'Largest winning trade', 'm'], ['worst', 'Largest losing trade', 'm'],
+  ['mcw', 'Max consecutive wins', 'n'], ['mcl', 'Max consecutive losses', 'n'], ['bars', 'Avg bars in trades', 'b'],
+  ['bars_win', 'Avg bars in winning trades', 'b'], ['bars_loss', 'Avg bars in losing trades', 'b'],
+  ['run_up', 'Avg run-up', 'm'], ['draw', 'Avg drawdown', 'm'], ['tp', 'Exits at take profit', 'n'], ['sl', 'Exits at stop', 'n'],
+];
+function fmtStat(v, kind) {
+  if (v == null || Number.isNaN(v)) return '—';
+  if (kind === 'm') return fmtMoney(v);
+  if (kind === 'p') return v.toFixed(2) + '%';
+  if (kind === 'r') return v.toFixed(3);
+  if (kind === 'b') return v.toFixed(1);
+  return String(v);
+}
+
+function cssVar(name, d) { return getComputedStyle(document.body).getPropertyValue(name).trim() || d; }
+
+function equityChart(box, trades) {
+  const LWC = LightweightCharts;
+  const ch = LWC.createChart(box, {
+    autoSize: true,
+    layout: { background: { type: 'solid', color: 'transparent' }, textColor: cssVar('--muted', '#888'), fontSize: 11, panes: { separatorColor: cssVar('--border', '#333') } },
+    grid: { vertLines: { visible: false }, horzLines: { color: cssVar('--border', '#2a2e39') } },
+    rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false, timeVisible: true },
+    crosshair: { mode: 0 }, handleScroll: true, handleScale: true,
+  });
+  const off = S.tzOffset || 0;
+  const pts = new Map();
+  for (const t of trades.slice().sort((a, b) => a.exit_ts - b.exit_ts)) pts.set(t.exit_ts + off, (pts.get(t.exit_ts + off) || 0) + t.net);
+  let eq = 0, peak = 0;
+  const first = trades.length ? Math.min(...trades.map(t => t.entry_ts)) + off : null;
+  const E = [], D = [];
+  if (first != null && !pts.has(first)) { E.push({ time: first, value: 0 }); D.push({ time: first, value: 0 }); }
+  for (const [time, n] of [...pts.entries()].sort((a, b) => a[0] - b[0])) {
+    eq += n; peak = Math.max(peak, eq);
+    E.push({ time, value: eq }); D.push({ time, value: eq - peak });
+  }
+  const fmt = { type: 'price', precision: 2, minMove: 0.01 };
+  const e = ch.addSeries(LWC.BaselineSeries, { baseValue: { type: 'price', price: 0 }, priceFormat: fmt, lineWidth: 2,
+    topLineColor: '#089981', topFillColor1: 'rgba(8,153,129,.28)', topFillColor2: 'rgba(8,153,129,.04)',
+    bottomLineColor: '#f23645', bottomFillColor1: 'rgba(242,54,69,.04)', bottomFillColor2: 'rgba(242,54,69,.28)', title: 'Equity' });
+  e.setData(E);
+  const d = ch.addSeries(LWC.HistogramSeries, { color: 'rgba(242,54,69,.5)', priceFormat: fmt, title: 'Drawdown', lastValueVisible: false, priceLineVisible: false }, 1);
+  d.setData(D);
+  try { ch.panes()[0].setStretchFactor(3); ch.panes()[1].setStretchFactor(1); } catch { /* older LWC */ }
+  ch.timeScale().fitContent();
+  return ch;
+}
+
+function csvOf(trades) {
+  const q = (v) => (v == null ? '' : typeof v === 'string' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const iso = (s) => (s == null ? '' : new Date(s * 1000).toISOString());
+  const rows = [['symbol', 'side', 'entry_time_utc', 'entry_price', 'exit_time_utc', 'exit_price', 'exit', 'stop', 'take_profit', 'net', 'net_pct', 'bars']];
+  for (const t of trades) rows.push([t.symbol || '', t.side > 0 ? 'long' : 'short', iso(t.entry_ts), t.entry_px, iso(t.exit_ts), t.exit_px, t.reason || '', t.stop, t.tp, t.net.toFixed(4), t.pct?.toFixed(4), t.bars ?? '']);
+  return rows.map(r => r.map(q).join(',')).join('\n');
+}
+
+/**
+ * r: {symbols: [{symbol, metrics, trades, skipped}], total, ms}; opts: {strategy, size, title, onSymbol}.
+ * Returns {el, destroy}.
+ */
+function resultsView(r, { strategy, size = 1000, title = '', testid = 'st' } = {}) {
+  const tfSec = meta?.tf_sec?.[strategy.tf] || TF_SECONDS[strategy.tf] || 3600;
+  const ok = r.symbols.filter(s => !s.skipped);
+  const all = ok.flatMap(s => (s.trades || []).map(t => ({ ...t, symbol: s.symbol, pct: t.net / size * 100 })));
+  all.sort((a, b) => a.entry_ts - b.entry_ts);
+  const capital = size * Math.max(1, ok.length);
+  const t = r.total || {};
+  const P = { all: perfStats(all, tfSec), long: perfStats(all.filter(x => x.side > 0), tfSec), short: perfStats(all.filter(x => x.side < 0), tfSec) };
+  let chart = null;
+  const root = el('div', { class: 'rep', 'data-testid': `${testid}-report` });
+  const tabs = el('div', { class: 'rep-tabs' });
+  const body = el('div', { class: 'rep-body' });
+  const card = (label, v, c = '', sub = '') => el('div', { class: 'card' }, el('b', { class: c }, v), el('small', {}, label), sub ? el('small', { class: 'muted' }, sub) : null);
+  const pages = {
+    overview: () => {
+      const eqBox = el('div', { class: 'eq-chart', 'data-testid': `${testid}-equity` });
+      const node = el('div', {},
+        el('div', { class: 'cards', 'data-testid': `${testid}-total` },
+          card('Net profit', fmtMoney(P.all.net), cls(P.all.net), fmtPct(P.all.net / capital * 100)),
+          card('Trades', P.all.trades), card('Win rate', P.all.win_pct != null ? P.all.win_pct.toFixed(1) + '%' : '—'),
+          card('Profit factor', P.all.pf != null ? P.all.pf.toFixed(2) : '—'),
+          card('Max drawdown', t.max_dd_pct != null ? t.max_dd_pct.toFixed(1) + '%' : fmtMoney(P.all.max_dd), t.max_dd_pct != null ? 'down' : cls(P.all.max_dd)),
+          card('Avg trade', fmtMoney(P.all.avg), cls(P.all.avg)),
+          card('Sharpe', t.sharpe != null ? t.sharpe.toFixed(2) : '—'), card('Exposure', t.exposure_pct != null ? t.exposure_pct.toFixed(1) + '%' : '—')),
+        all.length ? eqBox : el('div', { class: 'bp-empty' }, 'No closed trade in this period.'));
+      if (all.length) requestAnimationFrame(() => { chart?.remove(); chart = equityChart(eqBox, all); });
+      return node;
+    },
+    performance: () => el('table', { class: 'sc-table perf', 'data-testid': `${testid}-perf` },
+      el('thead', {}, el('tr', {}, ['', 'All', 'Long', 'Short'].map(h => el('th', {}, h)))),
+      el('tbody', {}, PERF_ROWS.map(([k, label, kind]) => el('tr', {}, el('td', { class: 'l' }, label),
+        ...['all', 'long', 'short'].map(s => el('td', { class: kind === 'm' ? cls(P[s][k]) : '' }, fmtStat(P[s][k], kind))))))),
+    trades: () => {
+      const many = ok.length > 1;
+      let desc = true;
+      const box = el('div');
+      const render = () => {
+        const list = desc ? all.slice().reverse() : all;
+        let cum = 0;
+        const cums = new Map(all.slice().sort((a, b) => a.exit_ts - b.exit_ts).map(x => [x, (cum += x.net)]));
+        const tb = el('tbody');
+        list.slice(0, 3000).forEach((x) => {
+          const n = all.indexOf(x) + 1;
+          tb.append(el('tr', { onclick: async () => { await showTrades(x.symbol, strategy.tf, all.filter(y => y.symbol === x.symbol)); focusTrade(x); } },
+            el('td', {}, n), many ? el('td', {}, app.symbolName(x.symbol)) : null,
+            el('td', { class: `l ${x.side > 0 ? 'up' : 'down'}` }, x.side > 0 ? 'Long' : 'Short'),
+            el('td', {}, fmtDT(x.entry_ts)), el('td', {}, fmtVal(x.entry_px)), el('td', {}, fmtDT(x.exit_ts)), el('td', {}, fmtVal(x.exit_px)),
+            el('td', {}, el('span', { class: `pill ${x.reason || ''}` }, exitTag(x))),
+            el('td', {}, fmtVal(x.stop)), el('td', {}, fmtVal(x.tp)),
+            el('td', { class: cls(x.net) }, fmtMoney(x.net)), el('td', { class: cls(x.pct) }, fmtPct(x.pct)),
+            el('td', { class: cls(cums.get(x)) }, fmtMoney(cums.get(x))),
+            el('td', {}, x.run_up != null ? fmtMoney(x.run_up) : '—'), el('td', {}, x.draw != null ? fmtMoney(-x.draw) : '—'),
+            el('td', {}, x.bars ?? Math.round((x.exit_ts - x.entry_ts) / tfSec))));
+        });
+        const heads = ['#', ...(many ? ['Symbol'] : []), 'Side', 'Entry', 'Price', 'Exit', 'Price', 'Signal', 'Stop', 'TP', 'Net', 'Net %', 'Cum. net', 'Run-up', 'Drawdown', 'Bars'];
+        box.replaceChildren(
+          el('div', { class: 'sub-head' }, `${all.length} trades${all.length > 3000 ? ' (latest 3000 shown)' : ''} · click one to see it on the chart`, el('div', { class: 'spacer' }),
+            el('button', { class: 'btn small ghost', onclick: () => { desc = !desc; render(); } }, desc ? 'Newest first' : 'Oldest first'),
+            el('button', { class: 'btn small ghost', 'data-testid': `${testid}-csv`, onclick: () => {
+              const a = el('a', { href: URL.createObjectURL(new Blob([csvOf(all)], { type: 'text/csv' })), download: `${(title || 'trades').replace(/[^\w.-]+/g, '_')}.csv` });
+              a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            } }, 'Export CSV')),
+          all.length ? el('table', { class: 'sc-table', 'data-testid': `${testid}-trades` }, el('thead', {}, el('tr', {}, heads.map(h => el('th', {}, h)))), tb)
+            : el('div', { class: 'bp-empty' }, 'No closed trade.'));
+      };
+      render();
+      return box;
+    },
+    symbols: () => {
+      const tradesBox = el('div');
+      const tb = el('tbody');
+      for (const s of r.symbols) {
+        const m = s.metrics || {};
+        const tr = el('tr', { 'data-sym': s.symbol, onclick: async () => {
+          for (const x of tb.children) x.classList.toggle('sel', x === tr);
+          if (s.skipped) return;
+          const tl = s.trades.map(x => ({ ...x, symbol: s.symbol }));
+          await showTrades(s.symbol, strategy.tf, tl);
+          tradesBox.replaceChildren(el('div', { class: 'sub-head' }, `${app.symbolName(s.symbol)} · ${s.trades.length} trades (click one to see it on the chart)`, el('div', { class: 'spacer' }),
+            el('button', { class: 'btn small ghost', onclick: () => { clearTrades(); tradesBox.replaceChildren(); } }, 'Hide on chart')),
+          tradesTable(tl.slice().reverse().map(x => ({ ...x, symbol: undefined })), { onPick: focusTrade }));
+        } }, el('td', {}, app.symbolName(s.symbol)),
+        ...(s.skipped ? [el('td', { colspan: 6, class: 'l muted' }, s.skipped)] : [
+          el('td', {}, m.trades ?? 0), el('td', { class: cls(m.net) }, fmtMoney(m.net)), el('td', {}, m.win_pct != null ? m.win_pct.toFixed(1) + '%' : '—'),
+          el('td', {}, m.profit_factor != null ? m.profit_factor.toFixed(2) : '—'), el('td', {}, m.max_dd_pct != null ? m.max_dd_pct.toFixed(1) + '%' : '—'),
+          el('td', {}, m.sharpe != null ? m.sharpe.toFixed(2) : '—')]));
+        tb.append(tr);
+      }
+      return el('div', {}, el('table', { class: 'sc-table', 'data-testid': `${testid}-table` }, el('thead', {}, el('tr', {}, ['Symbol', 'Trades', 'Net', 'Win %', 'PF', 'Max DD', 'Sharpe'].map(h => el('th', {}, h)))), tb), tradesBox);
+    },
+  };
+  const names = [['overview', 'Overview'], ['performance', 'Performance'], ['trades', 'List of trades'], ['symbols', `Symbols (${r.symbols.length})`]];
+  let curPage = ls.get('rep.page', 'overview');
+  if (!pages[curPage]) curPage = 'overview';
+  const show = (id) => {
+    curPage = id; ls.set('rep.page', id);
+    for (const b of tabs.children) b.classList.toggle('active', b.dataset.page === id);
+    if (id !== 'overview') { chart?.remove(); chart = null; }
+    body.replaceChildren(pages[id]());
+  };
+  tabs.append(...names.map(([id, label]) => el('button', { class: 'rep-tab', 'data-page': id, 'data-testid': `rep-${id}`, onclick: () => show(id) }, label)));
+  root.append(
+    el('div', { class: 'help', style: { padding: '4px 8px', margin: 0 } }, `${title ? title + ' · ' : ''}${strategySummary(strategy)} · ${strategy.tf}${r.ms != null ? ` · ${(r.ms / 1000).toFixed(1)}s` : ''}`),
+    tabs, body);
+  show(curPage);
+  return { el: root, destroy: () => { chart?.remove(); chart = null; } };
+}
+
 // ======================================================================= panel shell
 let panelTab = null;
 const TABS = [['screener', 'Screener'], ['tester', 'Strategy Tester'], ['paper', 'Paper Trading']];
@@ -289,6 +618,12 @@ export function initScreener(a) {
   const tg = $('#bp-toggles');
   for (const [id, label] of TABS) tg.append(el('button', { class: 'bb-btn', 'data-bp': id, 'data-testid': `bp-${id}`, onclick: () => openPanel(panelTab === id ? null : id) }, label));
   app.openBottomPanel = openPanel;
+  app.legendExtra = strategyLegend;
+  initScreenTab();
+  // the strategy on the chart follows the chart: new symbol / timeframe / history, and new bars
+  let rt = null;
+  app.on('barsLoaded', () => { clearTimeout(rt); rt = setTimeout(() => runChartStrategy(), 400); });
+  setInterval(() => { if (chartStrat && !document.hidden) runChartStrategy(); }, 30000);
   app.on('symbolChanged', () => { if (shown && shown.symbol !== S.symbol) shown = null; });
   app.on('barsLoaded', () => applyMarkers());
   const last = ls.get('bp.tab', null);
@@ -371,7 +706,7 @@ function screenerView() {
   const table = el('div', { class: 'bp-scroll' });
 
   const dirty = () => JSON.stringify(cur.spec) !== saved;
-  const persist = () => ls.set('sc.cur', cur);
+  const persist = () => { ls.set('sc.cur', cur); screenTabHead?.(); };
   const renderHead = () => {
     nameBtn.replaceChildren(el('span', {}, (cur.name || 'Unsaved screen') + (dirty() ? ' *' : '')), el('span', { html: ICONS.caret, style: { display: 'inline-flex', marginLeft: '4px' } }));
     tf.replaceChildren(...meta.timeframes.map(t => el('option', { value: t, selected: t === cur.spec.tf }, t)));
@@ -470,6 +805,7 @@ function screenerView() {
       if (my !== seq) return;
       res = r;
       lastResults = r.rows.map(x => x.symbol);
+      publishScreen(cur, r);
       const bar = r.time ? fmtDT(r.time) : '—';
       status.textContent = `${r.rows.length} of ${r.scanned - r.skipped} match · bar ${bar} (${cur.spec.tf})`;
       status.title = r.skipped ? `${r.skipped} symbols without data on this bar were skipped` : '';
@@ -494,7 +830,7 @@ function screenerView() {
     table);
   renderHead();
   app.on('symbolChanged', () => { for (const tr of table.querySelectorAll('tr[data-sym]')) tr.classList.toggle('sel', tr.dataset.sym === S.symbol); });
-  return { el: root, show: () => {
+  return { el: root, current: () => cur, load, run, show: () => {
     renderHead();
     run();
     clearInterval(timer);
@@ -532,123 +868,326 @@ async function screenerAlertDialog(cur) {
       } }, 'Create')] });
 }
 
-// ======================================================================= strategy tester tab
-function symbolsPicker(initial) {
-  const box = el('div', { class: 'st-row' });
-  const sel = el('select', { 'data-testid': 'st-symbols' });
-  const custom = el('input', { placeholder: 'BTCUSDT, ETHUSDT …', style: { flex: 1, minWidth: '160px' }, value: initial?.custom || '', 'data-testid': 'st-symbols-custom' });
-  const render = () => {
-    const v = sel.value || initial?.mode || 'current';
-    sel.replaceChildren(el('option', { value: 'current' }, 'Current symbol'), el('option', { value: 'screen' }, 'Screener results'),
-      ...(S.watchlists || []).map(w => el('option', { value: 'wl:' + w.id }, `Watchlist: ${w.name}`)), el('option', { value: 'custom' }, 'Symbols…'));
-    sel.value = v;
-    custom.hidden = sel.value !== 'custom';
-  };
-  sel.onchange = () => { custom.hidden = sel.value !== 'custom'; };
-  render();
-  box.append(el('label', {}, 'Symbols'), sel, custom);
-  return { el: box, render, get: () => {
-    const v = sel.value;
-    if (v === 'current') return [S.symbol];
-    if (v === 'screen') return lastResults || [];
-    if (v.startsWith('wl:')) return (S.watchlists.find(w => w.id === v.slice(3))?.symbols || []).slice();
-    const prefix = app.symbolSource(S.symbol) || meta.sources[0]?.prefix;
-    return custom.value.split(/[\s,;]+/).filter(Boolean).map(x => (x.includes(':') ? x : `${prefix}:${x}`).toUpperCase());
-  }, mode: () => ({ mode: sel.value, custom: custom.value }) };
+// ======================================================================= the screen in the right panel
+// The Screener tab of the right panel lists the symbols matching the active screen (the one open in the screener),
+// refreshed every minute while the tab is visible; a click opens the symbol.
+let screenRes = null;            // {sig, res, at}
+let screenTabHead = null, screenTabRender = null;
+const screenSig = (spec) => JSON.stringify(spec ? { ...spec, sort: null, columns: null } : null);
+function activeScreen() {
+  return views.screener ? views.screener.current() : (ls.get('sc.cur', null) || { id: null, name: '', spec: null });
 }
+function publishScreen(cur, res) {
+  screenRes = { sig: screenSig(cur.spec), res, at: Date.now() };
+  screenTabRender?.();
+}
+
+function initScreenTab() {
+  const tab = $('#tab-screen');
+  if (!tab) return;
+  const nameBtn = el('button', { class: 'tb-btn', 'data-testid': 'rs-menu', style: { fontWeight: 600 } });
+  const status = el('div', { class: 'rs-status', 'data-testid': 'rs-status' });
+  const list = el('div', { class: 'wl-list', 'data-testid': 'rs-list' });
+  let running = false;
+  const visible = () => !tab.hidden && !document.hidden;
+  const run = async () => {
+    const cur = activeScreen();
+    if (!cur.spec || running) return;
+    running = true;
+    status.textContent = 'Scanning…';
+    try { publishScreen(cur, await api.screenerRun(cur.spec)); lastResults = screenRes.res.rows.map(x => x.symbol); } catch (e) { status.textContent = e.message; }
+    finally { running = false; }
+  };
+  screenTabHead = () => nameBtn.replaceChildren(el('span', {}, activeScreen().name || 'Unsaved screen'), el('span', { html: ICONS.caret }));
+  screenTabRender = () => {
+    screenTabHead();
+    const cur = activeScreen();
+    if (!cur.spec) {
+      status.textContent = '';
+      list.replaceChildren(el('div', { class: 'wl-empty' }, 'No screen yet. ', el('a', { href: '#', onclick: (e) => { e.preventDefault(); openPanel('screener'); } }, 'Open the screener')));
+      return;
+    }
+    if (!screenRes || screenRes.sig !== screenSig(cur.spec)) { list.replaceChildren(); status.textContent = ''; return; }
+    const r = screenRes.res;
+    const sk = cur.spec.sort || { key: 'qvol24', dir: -1 };
+    const val = (x) => (sk.key === 'symbol' ? x.symbol : sk.key === 'last' ? (x.last ?? x.close) : /^v\d+$/.test(sk.key) ? x.values[+sk.key.slice(1)] : x[sk.key]);
+    const rows = r.rows.slice().sort((x, y) => {
+      const a = val(x), b = val(y);
+      if (a == null) return 1; if (b == null) return -1;
+      return (typeof a === 'string' ? a.localeCompare(b) : a - b) * sk.dir;
+    });
+    status.textContent = `${r.rows.length} match · ${cur.spec.tf} · bar ${r.time ? fmtDT(r.time) : '—'}`;
+    list.replaceChildren(...rows.map(x => el('div', { class: `wl-row rs-row ${x.symbol === S.symbol ? 'active' : ''}`, 'data-sym': x.symbol, title: x.symbol,
+      onclick: () => app.setSymbol(x.symbol) },
+    el('span', { class: 'wl-sym' }, app.symbolName(x.symbol), x.entered ? el('span', { class: 'new-dot', title: 'New match on this bar' }) : null),
+    el('span', { class: 'wl-last' }, fmtVal(x.last ?? x.close)),
+    el('span', { class: `wl-chgp ${cls(x.chg24)}` }, x.chg24 != null ? fmtPct(x.chg24) : ''))));
+    if (!rows.length) list.append(el('div', { class: 'wl-empty' }, 'No symbol matches the filters on the last closed bar.'));
+  };
+  nameBtn.onclick = async () => {
+    let screens = [];
+    try { screens = (await api.screens()).screens; } catch { /* */ }
+    const cur = activeScreen();
+    showMenu(nameBtn, [
+      ...(screens.length ? [{ title: 'Saved screens' }] : []),
+      ...screens.map(sc => ({ label: sc.name, active: sc.id === cur.id, testid: 'rs-open', onClick: async () => {
+        if (views.screener) views.screener.load(sc);
+        else { ls.set('sc.cur', { id: sc.id, name: sc.name, spec: JSON.parse(JSON.stringify(sc.spec)) }); screenTabRender(); run(); }
+      } })),
+      { sep: true },
+      { label: 'Edit in the screener', testid: 'rs-edit', onClick: () => openPanel('screener') },
+    ]);
+  };
+  tab.append(el('div', { class: 'wl-head' }, nameBtn, el('div', { class: 'spacer' }),
+    el('button', { class: 'tb-btn icon', title: 'Refresh', 'data-testid': 'rs-refresh', onclick: run }, '↻')),
+  el('div', { class: 'wl-cols rs-cols' }, el('span', {}, 'Symbol'), el('span', {}, 'Last'), el('span', {}, 'Chg 24h')), list, status);
+  const stale = () => !screenRes || screenRes.sig !== screenSig(activeScreen().spec) || Date.now() - screenRes.at > 60000;
+  app.on('rpTab', (t) => { if (t === 'screen') { screenTabRender(); if (stale()) run(); } });
+  app.on('symbolChanged', () => { for (const r of list.querySelectorAll('[data-sym]')) r.classList.toggle('active', r.dataset.sym === S.symbol); });
+  setInterval(() => {
+    // the open screener refreshes itself every minute; otherwise this tab does while it is visible
+    if (visible() && !(panelTab === 'screener' && !$('#bpanel').hidden) && stale()) run();
+  }, 15000);
+  screenTabRender();
+}
+
+// ======================================================================= symbol picker
+const fillSources = () => [['current', 'Current symbol'], ['screen', 'Screener results'], ...(S.watchlists || []).map(w => ['wl:' + w.id, `Watchlist: ${w.name}`])];
+function resolveSymbols(v) {
+  if (v === 'current') return [S.symbol];
+  if (v === 'screen') return (lastResults || []).slice();
+  if (v && v.startsWith('wl:')) return (S.watchlists.find(w => w.id === v.slice(3))?.symbols || []).slice();
+  return [];
+}
+
+/**
+ * Symbols of a backtest / paper-trading strategy. With modes: the current symbol, the screener's results, a
+ * watchlist (all resolved when run) or a list picked in the symbol search (several at once).
+ */
+function symbolPicker(init, { modes = true, testid = 'st', onChange } = {}) {
+  let list = (init?.list || []).slice();
+  const box = el('div', { class: 'st-syms' });
+  const sel = modes ? el('select', { 'data-testid': `${testid}-symbols` }) : null;
+  const chips = el('div', { class: 'chips sym-chips', 'data-testid': `${testid}-sym-chips` });
+  const count = el('span', { class: 'muted' });
+  const changed = () => { renderChips(); onChange?.(); };
+  const renderChips = () => {
+    chips.replaceChildren(...list.map(s => el('span', { class: 'chip', 'data-testid': 'sym-chip', title: s }, app.symbolName(s),
+      el('button', { class: 'x', title: 'Remove', onclick: () => { list = list.filter(x => x !== s); changed(); } }, '×'))));
+    if (!list.length) chips.append(el('span', { class: 'muted' }, 'No symbol yet: add some from the symbol search.'));
+    count.textContent = `${list.length} symbol${list.length === 1 ? '' : 's'}`;
+  };
+  const add = el('button', { class: 'btn small', 'data-testid': `${testid}-sym-add`, onclick: () => dialogs.symbolSearch(app, {
+    title: 'Add symbols', multi: true, isChecked: (s) => list.includes(s),
+    onPick: (s) => { list = list.includes(s) ? list.filter(x => x !== s) : [...list, s]; changed(); },
+  }) }, '+ Add symbols');
+  const fill = el('select', { title: 'Add the symbols of…', onchange: (e) => {
+    const v = e.target.value; e.target.value = '';
+    for (const s of resolveSymbols(v)) if (!list.includes(s)) list.push(s);
+    changed();
+  } });
+  const renderFill = () => fill.replaceChildren(el('option', { value: '' }, 'Add from…'), ...fillSources().map(([v, l]) => el('option', { value: v }, l)));
+  const clear = el('button', { class: 'btn small ghost', 'data-testid': `${testid}-sym-clear`, onclick: () => { list = []; changed(); } }, 'Clear');
+  const listBox = el('div', { class: 'sym-list' }, el('div', { class: 'st-row' }, add, fill, clear, count), chips);
+  const render = () => {
+    renderFill();
+    if (!sel) return;
+    let v = sel.value || init?.mode || 'current';
+    if (v === 'custom') v = 'list';
+    sel.replaceChildren(...fillSources().map(([k, l]) => el('option', { value: k }, l)), el('option', { value: 'list' }, 'Selected symbols…'));
+    sel.value = [...sel.options].some(o => o.value === v) ? v : 'current';
+    listBox.hidden = sel.value !== 'list';
+  };
+  if (sel) sel.onchange = () => { listBox.hidden = sel.value !== 'list'; if (sel.value === 'list' && !list.length) add.click(); onChange?.(); };
+  // a list typed in an older version ("custom")
+  if (!list.length && init?.custom) {
+    const prefix = app.symbolSource(S.symbol);
+    list = init.custom.split(/[\s,;]+/).filter(Boolean).map(x => (x.includes(':') ? x : `${prefix}:${x}`).toUpperCase());
+  }
+  renderChips(); render();
+  if (sel) box.append(el('div', { class: 'st-row' }, el('label', {}, 'Symbols'), sel));
+  box.append(listBox);
+  return { el: box, render,
+    get: () => (!sel || sel.value === 'list' ? list.slice() : resolveSymbols(sel.value)),
+    mode: () => ({ mode: sel ? sel.value : 'list', list: list.slice() }) };
+}
+
+// ======================================================================= strategy tester tab
+const DEFAULT_STRATEGY = () => ({ tf: '1h', long: { entry: [], stop: { k: 'pct', v: 0.02 }, tp: { k: 'pct', v: 0.04 } }, short: null });
 
 function testerView() {
   const root = el('div', { class: 'bp-body', 'data-testid': 'tester' });
-  const state = ls.get('st.form', null);
-  let screens = [];
+  // the form in progress: {id, name, spec: {strategy, symbols: {mode, list}, size, days}, from, to}
+  let st = ls.get('st.cur', null);
+  if (!st) {
+    const old = ls.get('st.form', null);   // before saved strategies
+    st = { id: null, name: '', spec: { strategy: old?.strategy || DEFAULT_STRATEGY(), symbols: old?.symbols || { mode: 'current', list: [] }, size: old?.size || 1000, days: 365 }, from: old?.from, to: old?.to };
+  }
+  let strategies = [], screens = [];
+  let saved = null;      // JSON of the saved spec (unsaved changes show *)
   const left = el('div');
   const right = el('div', { 'data-testid': 'st-results' }, el('div', { class: 'bp-empty' }, 'Set up a strategy and run a backtest. Signals at a bar\'s close fill at the next open; one position per symbol; fees 0.05% and slippage 0.02% per side (stops 0.08% more).'));
+  let report = null;
   let ed, syms;
-  const from = el('input', { type: 'date', value: state?.from || utcDate(Date.now() / 1000 - 365 * 86400), 'data-testid': 'st-from' });
-  const to = el('input', { type: 'date', value: state?.to || utcDate(Date.now() / 1000), 'data-testid': 'st-to' });
-  const size = el('input', { class: 'st-num', type: 'number', min: 1, value: state?.size || 1000 });
+  const from = el('input', { type: 'date', value: st.from || utcDate(Date.now() / 1000 - (st.spec.days || 365) * 86400), 'data-testid': 'st-from' });
+  const to = el('input', { type: 'date', value: st.to || utcDate(Date.now() / 1000), 'data-testid': 'st-to' });
+  const size = el('input', { class: 'st-num', type: 'number', min: 1, value: st.spec.size || 1000, 'data-testid': 'st-size' });
+  const nameBtn = el('button', { class: 'btn small', 'data-testid': 'st-menu' });
   const runBtn = el('button', { class: 'btn primary small', 'data-testid': 'st-run' }, 'Run backtest');
-  const build = (st, sm) => {
-    ed = strategyEditor(st, { screens });
-    syms = symbolsPicker(sm);
-    left.replaceChildren(el('div', { class: 'st-form' }, ed.el, syms.el,
+  const days = () => Math.max(1, Math.round((Date.parse(to.value) - Date.parse(from.value)) / 86400000) || 365);
+  const collect = () => ({ strategy: ed.get(), symbols: syms.mode(), size: +size.value || 1000, days: days() });
+  const dirty = () => saved == null || JSON.stringify(collect()) !== saved;
+  const renderHead = () => nameBtn.replaceChildren(el('span', {}, (st.name || 'Unsaved strategy') + (st.id && !dirty() ? '' : st.id ? ' *' : '')),
+    el('span', { html: ICONS.caret, style: { display: 'inline-flex', marginLeft: '4px' } }));
+  const remember = () => { st = { ...st, spec: collect(), from: from.value, to: to.value }; ls.set('st.cur', st); renderHead(); };
+  let rt = null;
+  const touched = () => { clearTimeout(rt); rt = setTimeout(remember, 150); };
+  const build = (spec) => {
+    ed = strategyEditor(spec.strategy, { screens, onChange: touched });
+    syms = symbolPicker(spec.symbols, { onChange: touched });
+    left.replaceChildren(el('div', { class: 'st-form' },
+      el('div', { class: 'st-row' }, nameBtn, el('div', { class: 'spacer' }),
+        el('button', { class: 'btn small ghost', 'data-testid': 'st-to-chart', title: 'Show the strategy\'s entries, exits, stops and take profits on the chart', onclick: () => {
+          addToChart({ id: st.id, name: st.name || 'Unsaved strategy', strategy: ed.get(), size: +size.value || 1000 });
+        } }, 'Add to chart')),
+      ed.el, syms.el,
       el('div', { class: 'st-row' }, el('label', {}, 'Period'), from, '–', to),
       el('div', { class: 'st-row' }, el('label', {}, 'Size'), size, el('span', { class: 'muted' }, 'per trade (quote currency)')),
       el('div', { class: 'st-row' }, runBtn, el('button', { class: 'btn small ghost', 'data-testid': 'st-to-paper', onclick: () => {
-        paperDialog({ name: '', strategy: ed.get(), symbols: syms.get(), size: +size.value || 1000, channels: [], active: true });
+        paperDialog({ name: st.name || '', strategy: ed.get(), symbols: syms.get(), size: +size.value || 1000, channels: [], active: true });
       } }, 'Paper trade this…'))));
+    renderHead();
   };
-  const remember = () => ls.set('st.form', { strategy: ed.get(), symbols: syms.mode(), from: from.value, to: to.value, size: +size.value || 1000 });
+  left.addEventListener('input', touched);
+  left.addEventListener('change', touched);
+  const loadStrategies = async () => { try { strategies = (await api.strategies()).strategies; } catch { strategies = []; } };
+  const open = (sc) => {
+    st = { id: sc.id, name: sc.name, spec: JSON.parse(JSON.stringify(sc.spec)) };
+    from.value = utcDate(Date.now() / 1000 - (sc.spec.days || 365) * 86400); to.value = utcDate(Date.now() / 1000);
+    size.value = sc.spec.size || 1000;
+    build(st.spec);
+    saved = JSON.stringify(collect());
+    remember();
+  };
+  const save = async (asNew = false) => {
+    let name = st.name;
+    if (asNew || !st.id) {
+      name = await promptDialog(asNew ? 'Save strategy as' : 'Save strategy', asNew ? `${st.name} copy` : st.name || 'My strategy');
+      if (!name) return false;
+    }
+    try {
+      const spec = collect();
+      const { strategy } = await api.saveStrategy({ id: asNew ? null : st.id, name, spec });
+      st = { ...st, id: strategy.id, name: strategy.name, spec };
+      saved = JSON.stringify(spec);
+      if (chartStrat && chartStrat.id === strategy.id) {   // the chart follows the saved strategy
+        chartStrat = { ...chartStrat, name: strategy.name, strategy: spec.strategy, size: spec.size };
+        ls.set('chart.strategy', chartStrat); runChartStrategy(true);
+      }
+      remember(); await loadStrategies();
+      toast('Strategy saved', 'ok');
+      return true;
+    } catch (e) { toast(e.message, 'error'); return false; }
+  };
+  nameBtn.onclick = async () => {
+    await loadStrategies();
+    showMenu(nameBtn, [
+      ...(strategies.length ? [{ title: 'Saved strategies' }] : []),
+      ...strategies.map(sc => ({ label: sc.name, active: sc.id === st.id, testid: 'st-open', onClick: () => open(sc) })),
+      { sep: true },
+      { label: 'New strategy', testid: 'st-new', onClick: () => {
+        st = { id: null, name: '', spec: { strategy: DEFAULT_STRATEGY(), symbols: syms.mode(), size: +size.value || 1000, days: days() } };
+        saved = null; build(st.spec); remember();
+      } },
+      { label: st.id ? 'Save' : 'Save…', testid: 'st-save', onClick: () => save(false) },
+      ...(st.id ? [
+        { label: 'Save as…', testid: 'st-saveas', onClick: () => save(true) },
+        { label: 'Rename…', testid: 'st-rename', onClick: async () => {
+          const n = await promptDialog('Rename strategy', st.name); if (!n) return;
+          const cur = strategies.find(x => x.id === st.id);
+          try {
+            await api.saveStrategy({ id: st.id, name: n, spec: cur ? cur.spec : collect() });
+            st.name = n; remember(); await loadStrategies();
+            if (chartStrat?.id === st.id) { chartStrat.name = n; ls.set('chart.strategy', chartStrat); app.renderLegend?.(); }
+          } catch (e) { toast(e.message, 'error'); }
+        } },
+        { label: 'Delete', testid: 'st-delete', onClick: async () => {
+          if (!(await confirmDialog(`Delete the strategy "${st.name}"?`, { ok: 'Delete', danger: true }))) return;
+          await api.deleteStrategy(st.id);
+          if (chartStrat?.id === st.id) { chartStrat.id = null; ls.set('chart.strategy', chartStrat); }
+          st = { ...st, id: null, name: '' }; saved = null; remember(); await loadStrategies();
+        } },
+      ] : []),
+    ]);
+  };
+  const showResult = (r, strategy, opts = {}) => {
+    report?.destroy();
+    report = resultsView(r, { strategy, size: opts.size || +size.value || 1000, title: opts.title || st.name || '' });
+    right.replaceChildren(report.el);
+  };
   runBtn.onclick = async () => {
     remember();
     const strategy = ed.get();
     const symbols = syms.get();
-    if (!symbols.length) return toast('No symbols to test (run the screener first, or pick a watchlist)', 'error');
+    if (!symbols.length) return toast('No symbols to test (add symbols, run the screener first, or pick a watchlist)', 'error');
     const start = Date.parse(from.value + 'T00:00:00Z') / 1000, end = Date.parse(to.value + 'T23:59:59Z') / 1000;
     runBtn.disabled = true;
+    report?.destroy(); report = null;
     right.replaceChildren(el('div', { class: 'bp-empty' }, `Running on ${symbols.length} symbol${symbols.length > 1 ? 's' : ''}…`));
     try {
       const r = await api.backtest({ source: app.symbolSource(symbols[0]) || meta.sources[0]?.prefix, strategy, symbols, start, end, size: +size.value || 1000 });
-      renderResults(r, strategy);
+      showResult(r, strategy);
     } catch (e) { right.replaceChildren(el('div', { class: 'bp-empty' }, e.message)); }
     finally { runBtn.disabled = false; }
   };
-  const renderResults = (r, strategy) => {
-    const t = r.total || {};
-    const card = (label, v, c = '') => el('div', { class: 'card' }, el('b', { class: c }, v), el('small', {}, label));
-    const tradesBox = el('div');
-    const tb = el('tbody');
-    for (const s of r.symbols) {
-      const m = s.metrics || {};
-      tb.append(el('tr', { 'data-sym': s.symbol, onclick: async () => {
-        for (const x of tb.children) x.classList.toggle('sel', x === tbRow);
-        if (s.skipped) return;
-        await showTrades(s.symbol, strategy.tf, s.trades);
-        tradesBox.replaceChildren(el('div', { class: 'sub-head' }, `${app.symbolName(s.symbol)} · ${s.trades.length} trades (click one to see it on the chart)`, el('div', { class: 'spacer' }),
-          el('button', { class: 'btn small ghost', onclick: () => { clearTrades(); tradesBox.replaceChildren(); } }, 'Hide on chart')),
-        tradesTable(s.trades.slice().reverse(), { onPick: focusTrade }));
-      } }, el('td', {}, app.symbolName(s.symbol)),
-      ...(s.skipped ? [el('td', { colspan: 6, class: 'l muted' }, s.skipped)] : [
-        el('td', {}, m.trades ?? 0), el('td', { class: cls(m.net) }, fmtMoney(m.net)), el('td', {}, m.win_pct != null ? m.win_pct.toFixed(1) + '%' : '—'),
-        el('td', {}, m.profit_factor != null ? m.profit_factor.toFixed(2) : '—'), el('td', {}, m.max_dd_pct != null ? m.max_dd_pct.toFixed(1) + '%' : '—'),
-        el('td', {}, m.sharpe != null ? m.sharpe.toFixed(2) : '—')])));
-      const tbRow = tb.lastChild;
-    }
-    right.replaceChildren(
-      el('div', { class: 'cards', 'data-testid': 'st-total' },
-        card('Net', fmtMoney(t.net ?? 0), cls(t.net)), card('Trades', t.trades ?? 0), card('Win rate', t.win_pct != null ? t.win_pct.toFixed(1) + '%' : '—'),
-        card('Profit factor', t.profit_factor != null ? t.profit_factor.toFixed(2) : '—'), card('Max drawdown', t.max_dd_pct != null ? t.max_dd_pct.toFixed(1) + '%' : '—'),
-        card('Sharpe', t.sharpe != null ? t.sharpe.toFixed(2) : '—'), card('Exposure', t.exposure_pct != null ? t.exposure_pct.toFixed(1) + '%' : '—')),
-      el('div', { class: 'help', style: { padding: '0 8px' } }, `${strategySummary(strategy)} · ${strategy.tf} · ${(r.ms / 1000).toFixed(1)}s`),
-      el('table', { class: 'sc-table', 'data-testid': 'st-table' }, el('thead', {}, el('tr', {}, ['Symbol', 'Trades', 'Net', 'Win %', 'PF', 'Max DD', 'Sharpe'].map(h => el('th', {}, h)))), tb),
-      tradesBox);
-  };
   root.append(el('div', { class: 'bp-split' }, left, right));
-  build(state?.strategy, state?.symbols);
-  return { el: root, show: async () => {
-    const st = ed.get(), sm = syms.mode();
-    try { screens = (await api.screens()).screens; } catch { screens = []; }
-    build(st, sm);   // saved screens for "Load entry from a saved screen", current watchlists
-  } };
+  build(st.spec);
+  loadStrategies().then(() => {
+    const sc = st.id && strategies.find(x => x.id === st.id);
+    if (sc) saved = JSON.stringify({ ...sc.spec });
+    if (sc && JSON.stringify(collect()) !== saved) { // compare through the form (number formats, default parameters)
+      const cur = JSON.stringify(collect());
+      const keep = { from: from.value, to: to.value };
+      build(sc.spec); size.value = sc.spec.size || 1000;
+      saved = JSON.stringify(collect());
+      build(JSON.parse(cur)); from.value = keep.from; to.value = keep.to; size.value = JSON.parse(cur).size;
+    }
+    renderHead();
+  });
+  return { el: root, showResult,
+    edit: (s) => {   // from the chart legend: the strategy shown on the chart
+      const sc = s.id && strategies.find(x => x.id === s.id);
+      if (sc) open(sc);
+      else { st = { id: null, name: s.name, spec: { strategy: s.strategy, symbols: { mode: 'current', list: [] }, size: s.size, days: days() } }; saved = null; build(st.spec); remember(); }
+    },
+    show: async () => {
+      const spec = collect();
+      try { screens = (await api.screens()).screens; } catch { screens = []; }
+      build(spec);   // saved screens for "Load entry from a saved screen", current watchlists
+    } };
 }
 
 // ======================================================================= paper trading tab
 function paperDialog(p, onSaved) {
   const isNew = !p.id;
-  let screens = [];
   const name = el('input', { value: p.name || '', placeholder: 'e.g. RSI bounce 15m', 'data-testid': 'pp-name', style: { width: '100%' } });
   const edBox = el('div');
   let ed = strategyEditor(p.strategy);
   edBox.append(ed.el);
-  api.screens().then(r => { screens = r.screens; const cur = ed.get(); ed = strategyEditor(cur, { screens }); edBox.replaceChildren(ed.el); }).catch(() => {});
-  const symsIn = el('textarea', { rows: 2, style: { width: '100%' }, 'data-testid': 'pp-symbols' });
-  symsIn.value = (p.symbols || []).map(s => app.symbolName(s)).join(', ');   // a textarea's value is not an attribute
-  const fill = el('select', { onchange: (e) => {
-    const v = e.target.value; e.target.value = '';
-    const list = v === 'current' ? [S.symbol] : v === 'screen' ? (lastResults || []) : v.startsWith('wl:') ? (S.watchlists.find(w => w.id === v.slice(3))?.symbols || []) : [];
-    symsIn.value = list.map(s => app.symbolName(s)).join(', ');
-  } }, el('option', { value: '' }, 'Fill from…'), el('option', { value: 'current' }, 'Current symbol'), el('option', { value: 'screen' }, 'Screener results'),
-  ...(S.watchlists || []).map(w => el('option', { value: 'wl:' + w.id }, `Watchlist: ${w.name}`)));
+  let strategies = [];
+  const fromSaved = el('select', { 'data-testid': 'pp-from-strategy', onchange: (e) => {
+    const sc = strategies.find(x => x.id === e.target.value); e.target.value = '';
+    if (!sc) return;
+    ed = strategyEditor(sc.spec.strategy); edBox.replaceChildren(ed.el);
+    if (!name.value) name.value = sc.name;
+    size.value = sc.spec.size || size.value;
+  } }, el('option', { value: '' }, 'Load a saved strategy…'));
+  Promise.all([api.screens().catch(() => ({ screens: [] })), api.strategies().catch(() => ({ strategies: [] }))]).then(([a, b]) => {
+    strategies = b.strategies;
+    fromSaved.append(...strategies.map(s => el('option', { value: s.id }, s.name)));
+    const cur = ed.get(); ed = strategyEditor(cur, { screens: a.screens }); edBox.replaceChildren(ed.el);
+  });
+  const syms = symbolPicker({ mode: 'list', list: p.symbols || [] }, { modes: false, testid: 'pp' });
   const size = el('input', { class: 'st-num', type: 'number', min: 1, value: p.size || 1000 });
   const allowed = S.plan?.limits?.alert_channels || Object.keys(CHANNELS);
   const chans = Object.keys(CHANNELS).filter(c => c !== 'app').map(c => el('label', { style: { display: 'inline-flex', gap: '4px', marginRight: '10px' } },
@@ -657,8 +1196,9 @@ function paperDialog(p, onSaved) {
   const m = modal({ title: isNew ? 'New paper-trading strategy' : `Edit: ${p.name}`, width: '720px',
     body: el('div', { class: 'st-form' },
       el('div', { class: 'st-row' }, el('label', {}, 'Name'), name),
+      el('div', { class: 'st-row' }, el('label', {}, 'Strategy'), fromSaved),
       edBox,
-      el('div', { class: 'st-row' }, el('label', {}, 'Symbols'), fill), symsIn,
+      el('div', { class: 'st-row' }, el('label', {}, 'Symbols')), syms.el,
       el('div', { class: 'st-row' }, el('label', {}, 'Size'), size, el('span', { class: 'muted' }, 'per trade (quote currency)')),
       el('div', { class: 'st-row' }, el('label', {}, 'Notify'), el('div', {}, chans, el('span', { class: 'muted' }, 'on entries and exits'))),
       el('div', { class: 'st-row' }, el('label', {}, 'Running'), active),
@@ -666,8 +1206,8 @@ function paperDialog(p, onSaved) {
       el('div', { class: 'help' }, 'Trades start with the first bar that closes after saving. Bars come from ClickHouse (the recent 1m table) and the exchange; positions are simulated with the backtest rules.')),
     footer: [el('button', { class: 'btn ghost', onclick: () => m.close() }, 'Cancel'),
       el('button', { class: 'btn primary', 'data-testid': 'pp-save', onclick: async () => {
-        const prefix = app.symbolSource(S.symbol) || meta.sources[0]?.prefix;
-        const symbols = symsIn.value.split(/[\s,;]+/).filter(Boolean).map(x => (x.includes(':') ? x : `${prefix}:${x}`).toUpperCase());
+        const symbols = syms.get();
+        const prefix = app.symbolSource(symbols[0] || S.symbol) || meta.sources[0]?.prefix;
         try {
           await api.savePaper({ id: p.id, name: name.value, source: prefix, strategy: ed.get(), symbols, size: +size.value || 1000,
             channels: chans.map(l => l.querySelector('input')).filter(i => i.checked).map(i => i.value), active: active.checked });
@@ -681,7 +1221,7 @@ function paperDialog(p, onSaved) {
 
 function paperView() {
   const root = el('div', { class: 'bp-body', 'data-testid': 'paper' });
-  let papers = [], sel = null, timer = null;
+  let papers = [], sel = null, timer = null, paperReport = null, detailKey = null;
   const list = el('div', { class: 'bp-scroll', style: { flex: '0 1 auto', maxHeight: '50%' } });
   const detail = el('div', { class: 'bp-scroll' });
   const refresh = async () => {
@@ -727,19 +1267,31 @@ function paperView() {
     }
     let trades = [];
     try { trades = (await api.paperTrades(p.id, p.run)).trades; } catch { /* */ }
-    const mapped = trades.map(t => ({ symbol: t.symbol, side: t.side, entry_ts: t.entry_time, exit_ts: t.exit_time, entry_px: t.entry_price, exit_px: t.exit_price, net: t.net }));
+    const bySym = new Map();
+    for (const t of trades) {
+      if (!bySym.has(t.symbol)) bySym.set(t.symbol, []);
+      bySym.get(t.symbol).push({ side: t.side, entry_ts: t.entry_time, exit_ts: t.exit_time, entry_px: t.entry_price, exit_px: t.exit_price, net: t.net,
+        reason: t.reason || ((t.exit_price - t.entry_price) * t.side < 0 ? 'sl' : 'tp'), stop: t.stop ?? null, tp: t.tp ?? null });
+    }
+    const r = { symbols: [...bySym.entries()].map(([symbol, tl]) => {
+      tl.sort((a, b) => a.entry_ts - b.entry_ts);
+      const n = tl.reduce((x, t) => x + t.net, 0), w = tl.filter(t => t.net > 0).length;
+      const gp = tl.filter(t => t.net > 0).reduce((x, t) => x + t.net, 0), gl = -tl.filter(t => t.net <= 0).reduce((x, t) => x + t.net, 0);
+      return { symbol, trades: tl, metrics: { trades: tl.length, net: n, win_pct: w / tl.length * 100, profit_factor: gl > 0 ? gp / gl : null } };
+    }), total: null };
     const waiting = Object.values(p.state).filter(v => v.status && v.status !== 'ok').length;
+    const key = `${p.id}|${p.updated_ms}|${trades.length}`;
+    if (key === detailKey && detail.childElementCount) return;   // the 30 s refresh: nothing new
+    detailKey = key;
+    paperReport?.destroy();
+    paperReport = trades.length ? resultsView(r, { strategy: p.strategy, size: p.size, title: `${p.name} · run #${p.run}`, testid: 'pp' }) : null;
     detail.replaceChildren(
       el('div', { class: 'help', style: { padding: '6px 8px', margin: 0 } }, `${p.name}: ${strategySummary(p.strategy)} · ${p.strategy.tf} · size ${p.size}` + (waiting ? ` · ${waiting} symbols waiting for data` : '')),
       el('div', { class: 'sub-head' }, `Open positions (${opens.length})`),
       opens.length ? el('table', { class: 'sc-table', 'data-testid': 'pp-open' }, el('thead', {}, el('tr', {}, ['Symbol', 'Side', 'Entry', 'Price', 'Last', 'Stop', 'TP', 'Unrealized'].map(h => el('th', {}, h)))), otb)
         : el('div', { class: 'bp-empty', style: { padding: '8px' } }, 'No open position.'),
-      el('div', { class: 'sub-head' }, `Closed trades of run #${p.run} (${mapped.length})`),
-      mapped.length ? tradesTable(mapped, { onPick: async (t) => {
-        const same = mapped.filter(x => x.symbol === t.symbol);
-        await showTrades(t.symbol, p.strategy.tf, same);
-        focusTrade(t);
-      } }) : el('div', { class: 'bp-empty', style: { padding: '8px' } }, 'No closed trade yet.'));
+      el('div', { class: 'sub-head' }, `Closed trades of run #${p.run} (${trades.length})`),
+      paperReport ? paperReport.el : el('div', { class: 'bp-empty', style: { padding: '8px' } }, 'No closed trade yet.'));
   };
   root.append(el('div', { class: 'bp-bar' }, el('button', { class: 'btn small primary', 'data-testid': 'pp-new', onclick: () => paperDialog({ strategy: null, symbols: [S.symbol], channels: [] }, refresh) }, '+ New strategy'),
     el('button', { class: 'btn small ghost', title: 'Refresh', onclick: refresh }, '↻'), el('div', { class: 'spacer' }),

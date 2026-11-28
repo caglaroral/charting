@@ -101,7 +101,7 @@ export const app = {
   chart: null, mainSeries: null, dm: null, sandbox: null,
   ind: { sig: null, items: [], token: 0 },
   htfCache: new Map(),
-  hooks: { symbolChanged: [], barsLoaded: [], alertsChanged: [], tick: [] },
+  hooks: { symbolChanged: [], barsLoaded: [], alertsChanged: [], tick: [], rpTab: [] },
   on(evt, fn) { this.hooks[evt].push(fn); },
   emit(evt, ...a) { for (const f of this.hooks[evt]) { try { f(...a); } catch (e) { console.error(e); } } },
 };
@@ -1037,6 +1037,7 @@ export async function refreshIndicators(force = false) {
   updateLegendValues(null);
 }
 app.refreshIndicators = refreshIndicators;
+app.renderLegend = () => renderLegend();
 
 /**
  * Index offset between S.view and an indicator result: results are computed on the bars of that
@@ -1633,6 +1634,8 @@ function renderLegend() {
       $('#pane-legends').append(el('div', { class: 'pane-legend', 'data-pane': it.pane }, row), el('div', { class: 'pane-ctrl-wrap', 'data-pane': it.pane }, ctr));
     } else main.append(row);
   }
+  const extra = app.legendExtra?.();   // the strategy on the chart (screener.js)
+  if (extra) main.append(extra);
   positionPaneLegends();
 }
 

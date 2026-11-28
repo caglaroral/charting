@@ -18,8 +18,8 @@ export function initPanels(a) {
   for (const b of document.querySelectorAll('.rp-tab')) {
     b.onclick = () => {
       for (const x of document.querySelectorAll('.rp-tab')) x.classList.toggle('active', x === b);
-      $('#tab-watchlist').hidden = b.dataset.tab !== 'watchlist';
-      $('#tab-alerts').hidden = b.dataset.tab !== 'alerts';
+      for (const t of document.querySelectorAll('.rightpanel .rp-tab')) $(`#tab-${t.dataset.tab}`).hidden = t !== b;
+      app.emit('rpTab', b.dataset.tab);
       if (b.dataset.tab === 'alerts') { unseen = 0; renderBadge(); }
     };
   }
@@ -184,7 +184,7 @@ function fmtQuote(v, ref = v) {
 
 // Update only the numeric cells (keeps hover/drag state)
 function updateQuoteCells() {
-  for (const row of document.querySelectorAll('.wl-row')) {
+  for (const row of document.querySelectorAll('#wl-list .wl-row')) {
     const q = S.quotes[row.dataset.sym];
     if (!q) continue;
     const cls = q.chg > 0 ? 'up' : q.chg < 0 ? 'down' : '';

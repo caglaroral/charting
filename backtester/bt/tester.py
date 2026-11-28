@@ -9,10 +9,24 @@ from . import market
 MAX_BARS = 250_000          # per symbol and run
 
 
+def _f(v):
+    return float(v) if np.isfinite(v) else None
+
+
 def _trades(r, size):
-    net = sim.trade_net(r['side'], r['entry_px'], r['exit_px'], size) if len(r['side']) else np.zeros(0)
-    return [{'side': int(s), 'entry_ts': int(a) // 1000, 'exit_ts': int(b) // 1000, 'entry_px': float(p), 'exit_px': float(q),
-             'net': float(n)} for s, a, b, p, q, n in zip(r['side'], r['entry_ts'], r['exit_ts'], r['entry_px'], r['exit_px'], net)], net
+    """Closed trades for the API. reason: 'sl' or 'tp' (stops sit below a long's fill and take-profits above, so
+    the exit price's side of the fill tells which level filled). run_up / draw: the best / worst move while open."""
+    side = r['side']
+    net = sim.trade_net(side, r['entry_px'], r['exit_px'], size) if len(side) else np.zeros(0)
+    out = []
+    for j in range(len(side)):
+        s, ep, xp = int(side[j]), float(r['entry_px'][j]), float(r['exit_px'][j])
+        q = size / ep
+        out.append({'side': s, 'entry_ts': int(r['entry_ts'][j]) // 1000, 'exit_ts': int(r['exit_ts'][j]) // 1000,
+                    'entry_px': ep, 'exit_px': xp, 'net': float(net[j]), 'reason': 'sl' if (xp - ep) * s < 0 else 'tp',
+                    'stop': _f(r['stop_lvl'][j]), 'tp': _f(r['tp_lvl'][j]), 'bars': int(r['bars'][j]),
+                    'run_up': float(r['run_up'][j]) * q, 'draw': float(r['draw'][j]) * q})
+    return out, net
 
 
 def _clean(m):

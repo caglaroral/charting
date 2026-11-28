@@ -82,6 +82,7 @@
   <aside class="rightpanel" id="rightpanel">
     <div class="rp-tabs">
       <button class="rp-tab active" data-tab="watchlist">Watchlist</button>
+      <button class="rp-tab" data-tab="screen" data-testid="rp-screen">Screener</button>
       <button class="rp-tab" data-tab="alerts">Alerts <span class="badge" id="alert-badge" hidden></span></button>
     </div>
     <section class="rp-section" id="tab-watchlist">
@@ -95,6 +96,7 @@
       <div class="wl-list" id="wl-list"></div>
       <div class="symbol-info" id="symbol-info"></div>
     </section>
+    <section class="rp-section" id="tab-screen" hidden data-testid="screen-tab"></section>
     <section class="rp-section" id="tab-alerts" hidden>
       <div class="al-head">
         <button class="btn small" id="al-new">+ Price alert</button>

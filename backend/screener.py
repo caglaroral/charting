@@ -131,6 +131,56 @@ def delete_screen(uid: str, sid: str) -> None:
                                  "updated_at": store._ts(store._now_ms())}])
 
 
+# --------------------------------------------------------------------------- saved strategies
+
+def list_strategies(uid: str) -> list[dict]:
+    rows = ch.query(f"SELECT id, name, spec, toUnixTimestamp64Milli(updated_at) AS updated_ms FROM {DB}.strategies FINAL "
+                    f"WHERE user_id = {{u:String}} AND deleted = 0 ORDER BY name", {"u": uid})
+    return [{"id": r["id"], "name": r["name"], "spec": json.loads(r["spec"] or "{}"), "updated_ms": int(r["updated_ms"])}
+            for r in rows]
+
+
+def get_strategy(uid: str, sid: str) -> dict | None:
+    return next((s for s in list_strategies(uid) if s["id"] == sid), None)
+
+
+def normalize_strategy_spec(spec: dict) -> dict:
+    """{strategy, symbols: {mode, list}, size, days}: the strategy is validated by the backtester."""
+    if not isinstance(spec, dict):
+        raise ValueError("Invalid strategy")
+    bt("/validate", {"strategy": spec.get("strategy")}, timeout=10)
+    st = spec.get("strategy")
+    sy = spec.get("symbols") if isinstance(spec.get("symbols"), dict) else {}
+    mode = str(sy.get("mode") or "current")[:80]
+    lst = [str(x)[:60] for x in (sy.get("list") or []) if isinstance(x, str)][:2000]
+    try:
+        size = min(max(float(spec.get("size") or 1000), 1.0), 1e9)
+        days = min(max(int(spec.get("days") or 365), 1), 36500)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid size or period") from None
+    return {"strategy": st, "symbols": {"mode": mode, "list": lst}, "size": size, "days": days}
+
+
+def save_strategy(user, s: dict) -> dict:
+    uid = user.id
+    name = str(s.get("name") or "").strip()[:MAX_NAME]
+    if not name:
+        raise ValueError("Name the strategy")
+    existing = get_strategy(uid, s["id"]) if s.get("id") else None
+    if not existing:
+        plans.check_count(user, "saved_strategies", len(list_strategies(uid)), "saved strategies")
+    row = {"user_id": uid, "id": existing["id"] if existing else uuid.uuid4().hex, "name": name,
+           "spec": json.dumps(normalize_strategy_spec(s.get("spec") or {}), separators=(",", ":")),
+           "updated_at": store._ts(store._now_ms())}
+    ch.insert(f"{DB}.strategies", [row])
+    return get_strategy(uid, row["id"])
+
+
+def delete_strategy(uid: str, sid: str) -> None:
+    ch.insert(f"{DB}.strategies", [{"user_id": uid, "id": sid, "name": "", "spec": "{}", "deleted": 1,
+                                    "updated_at": store._ts(store._now_ms())}])
+
+
 # --------------------------------------------------------------------------- running a screen
 
 def universe_symbols(uid: str, src, u: dict) -> list[str] | None:

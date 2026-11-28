@@ -367,6 +367,17 @@ class Handler(BaseHTTPRequestHandler):
             if method == "DELETE" and len(parts) > 1:
                 screener.delete_screen(uid, parts[1])
                 return self._json({"ok": True})
+        if route == "strategies":
+            if method == "GET":
+                return self._json({"strategies": screener.list_strategies(uid)})
+            if method in ("POST", "PUT"):
+                try:
+                    return self._json({"strategy": screener.save_strategy(user, self._body())})
+                except ValueError as e:
+                    raise HttpError(400, str(e))
+            if method == "DELETE" and len(parts) > 1:
+                screener.delete_strategy(uid, parts[1])
+                return self._json({"ok": True})
         if route == "backtest" and method == "POST":
             try:
                 return self._json(screener.backtest(user, self._body()))

@@ -21,6 +21,9 @@ All admin screens are in the **user menu** (top right) of an admin account.
 5. **Recent 1m table** (optional): a table of the latest 1m bars with the same columns (e.g. `live_1m_klines`),
    merged after the history tables' last bar by the screener, strategy tester and paper trading, so they run on
    today's bars. Existing sources got `live_1m_klines` once, when that table existed next to their tables.
+   The 1m table itself may already include the recent rows (e.g. the view `klines_1m_all` = `backtest_1m_klines`
+   + `live_1m_klines`): a minute present in both is counted once. The recent table is still needed for the other
+   timeframes when their tables (`backtest_5m_klines`, …) end before today.
 
 Missing timeframes are aggregated from the largest smaller table that divides them (e.g. 30m from
 15m, 1W from 1D). Passwords are stored encrypted with `SECRET_KEY` (generated into `.env` on first
@@ -56,6 +59,7 @@ also offers a permanent purge of the user and all their rows: `DELETE /api/admin
 | Watchlists / symbols per list | 2 / 30 | 10 / 200 | 50 / 1000 | ∞ |
 | Indicators per chart | 5 | 15 | 30 | ∞ |
 | Saved screens | 5 | 50 | 200 | ∞ |
+| Saved strategies | 5 | 50 | 200 | ∞ |
 | Screener alerts | – | ✓ | ✓ | ✓ |
 | Symbols per backtest run | 5 | 30 | 100 | ∞ |
 | Paper-trading strategies (running) | 1 | 10 | 50 | ∞ |

@@ -48,7 +48,8 @@ export function symbolSearch(app, { initial = '', title = 'Symbol search', multi
     else if (e.key === 'ArrowUp') { sel = Math.max(0, sel - 1); render(); e.preventDefault(); }
     else if (e.key === 'Enter' && items[sel]) { e.preventDefault(); pick(items[sel].symbol); }
   });
-  const m = modal({ title, width: '560px', body: el('div', {}, input, list) });
+  const m = modal({ title, width: '560px', body: el('div', {}, input, list),
+    footer: multi ? [el('span', { class: 'muted', style: { marginRight: 'auto' } }, 'Click symbols to add or remove them'), el('button', { class: 'btn primary', 'data-testid': 'search-done', onclick: () => m.close() }, 'Done')] : null });
   render();
   // focus right away: keys typed before a deferred focus went to the page and were lost ("ETH" -> "EH")
   const caretEnd = () => { input.focus(); input.setSelectionRange(input.value.length, input.value.length); };

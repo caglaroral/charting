@@ -50,6 +50,26 @@ def _exit_args(fr, sd, kind, n, side):
     raise ValueError(e)
 
 
+def _trade_levels(c, side, ei, xi, ep, args):
+    """Per closed trade (for display; the simulation is unchanged): the stop and take-profit levels set at the fill
+    (NaN for none or a moving level), the bars held, the best and worst price move while open (run-up and
+    drawdown, in price units, from the candles' high / low from the entry to the exit candle)."""
+    m = len(side)
+    stop, tp = np.full(m, np.nan), np.full(m, np.nan)
+    run_up, draw = np.zeros(m), np.zeros(m)
+    for j in range(m):
+        up = side[j] > 0
+        a = args[0:8] if up else args[8:16]
+        k = ei[j] - 1
+        for off, is_stop, out in ((0, True, stop), (4, False, tp)):
+            kind, val, ser = a[off], a[off + 1], a[off + 2]
+            if kind in (sim.PCT, sim.ATR):
+                out[j] = sim._level(ep[j], up, is_stop, kind, val, ser[k])
+        hi, lo = float(c.high[ei[j]:xi[j] + 1].max()), float(c.low[ei[j]:xi[j] + 1].min())
+        run_up[j], draw[j] = (hi - ep[j], ep[j] - lo) if up else (ep[j] - lo, hi - ep[j])
+    return {'stop_lvl': stop, 'tp_lvl': tp, 'bars': (xi - ei).astype(np.int64), 'run_up': run_up, 'draw': draw}
+
+
 def run(strategy, symbol, start_ms, end_ms, gate=None, warmup='full', signal_shift=0):
     """Trades of one strategy on one symbol and window. gate: optional function (ts array) -> (long_ok, short_ok)
     boolean arrays, e.g. a regime filter; it is applied to the signal candles. warmup: 'full' (indicators on the whole
@@ -77,11 +97,13 @@ def run(strategy, symbol, start_ms, end_ms, gate=None, warmup='full', signal_shi
             args += list(_exit_args(fr, sd, kind, n, side))
     side, ei, xi, ep, xp, op = sim.simulate(c.open, c.high, c.low, fr.first, lsig, ssig, np.array([bool(L), bool(S)]),
                                         *args, sim.STOP_SLIP)
+    lvl = _trade_levels(c, side, ei, xi, ep, args)
     pos = int(op[0])
     open_ = None if pos == 0 else {'side': pos, 'entry_ts': int(c.ts[int(op[1])]), 'signal_ts': int(c.ts[int(op[1]) - 1]),
                                    'entry_px': float(op[2]), 'stop': float(op[3]), 'tp': float(op[4])}
     return {'symbol': fr.symbol, 'side': side, 'entry_ts': c.ts[ei], 'exit_ts': c.ts[xi], 'entry_px': ep, 'exit_px': xp,
-            'net': sim.trade_net(side, ep, xp), 'open': open_, 'last_ts': int(c.ts[-1]), 'last_close': float(c.close[-1])}
+            'net': sim.trade_net(side, ep, xp), 'open': open_, 'last_ts': int(c.ts[-1]), 'last_close': float(c.close[-1]),
+            **lvl}
 
 
 def _job(args):

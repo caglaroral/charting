@@ -135,7 +135,7 @@ def delete_paper(uid: str, pid: str) -> None:
 
 
 def trades(uid: str, pid: str, run: int | None = None, limit: int = 1000) -> list[dict]:
-    q = (f"SELECT run, symbol, side, entry_time, exit_time, entry_price, exit_price, net FROM {DB}.paper_trades FINAL "
+    q = (f"SELECT run, symbol, side, entry_time, exit_time, entry_price, exit_price, net, reason, stop, tp FROM {DB}.paper_trades FINAL "
          f"WHERE user_id = {{u:String}} AND paper_id = {{p:String}}")
     params = {"u": uid, "p": pid, "n": limit}
     if run is not None:
@@ -172,7 +172,8 @@ def step(p: dict, uid: str) -> None:
             for t in r["trades"]:
                 new_trades.append({"user_id": uid, "paper_id": p["id"], "run": p["run"], "symbol": key, "side": t["side"],
                                    "entry_time": t["entry_ts"], "exit_time": t["exit_ts"], "entry_price": t["entry_px"],
-                                   "exit_price": t["exit_px"], "net": t["net"]})
+                                   "exit_price": t["exit_px"], "net": t["net"], "reason": t.get("reason", ""),
+                                   "stop": t.get("stop"), "tp": t.get("tp")})
                 events.append(f"Closed {'long' if t['side'] > 0 else 'short'} {key} at {_fmt(t['exit_px'])}: "
                               f"{t['net']:+.2f}")
             op = r.get("open")
